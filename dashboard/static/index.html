@@ -5,24 +5,91 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CV Safety Monitor — Dashboard</title>
 <link rel="stylesheet" href="/static/style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body>
 
-<!-- Alert Bar -->
-<div id="alert-bar">
-  <span class="dot" id="status-dot"></span>
-  <span class="title">CV Safety Monitor</span>
-  <span class="latest-alert" id="latest-alert-text">— No alerts —</span>
+<!-- Top Bar -->
+<header id="topbar">
+  <div class="logo">
+    <div class="icon">&#x1F3D7;</div>
+    <span>CV Safety Monitor</span>
+  </div>
+  <div class="stats">
+    <div class="stat">
+      <span class="dot-indicator live" id="ws-indicator"></span>
+      <span>Live</span>
+    </div>
+    <div class="stat">
+      <span class="val" id="stat-cameras">0</span>
+      <span>Cameras</span>
+    </div>
+    <div class="stat">
+      <span class="val" id="stat-violations" style="color:var(--text-primary)">0</span>
+      <span>Alerts today</span>
+    </div>
+  </div>
+</header>
+
+<!-- Alert Banner -->
+<div id="alert-banner">
+  <span class="alert-type" id="alert-type"></span>
+  <span class="alert-camera" id="alert-camera"></span>
+  <span class="alert-time" id="alert-time"></span>
 </div>
 
-<!-- Camera Grid -->
-<div id="camera-grid"></div>
+<!-- Main Content -->
+<div id="main-content">
+  <!-- Stats Strip -->
+  <div class="stats-strip">
+    <div class="stat-card">
+      <div class="stat-icon cameras">&#x1F4F7;</div>
+      <div class="stat-info">
+        <div class="stat-label">Active Cameras</div>
+        <div class="stat-value blue" id="stat-active-cameras">0</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon alerts">&#x26A0;</div>
+      <div class="stat-info">
+        <div class="stat-label">Violations Today</div>
+        <div class="stat-value red" id="stat-total-violations">0</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon uptime">&#x23F1;</div>
+      <div class="stat-info">
+        <div class="stat-label">Uptime</div>
+        <div class="stat-value green" id="stat-uptime">00:00</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon ros">&#x1F3AF;</div>
+      <div class="stat-info">
+        <div class="stat-label">ROI Zones</div>
+        <div class="stat-value blue" id="stat-roi-count">0</div>
+      </div>
+    </div>
+  </div>
 
-<!-- Navigation -->
-<div id="nav">
-  <a href="/admin.html">&#x2699; ROI Tool</a>
-  <a href="/history.html">&#x1F4CB; History</a>
+  <!-- Camera Grid -->
+  <div id="camera-grid"></div>
 </div>
+
+<!-- Navigation Dock -->
+<nav id="nav-dock">
+  <a href="/" class="active">
+    <span>&#x1F4F7;</span> <span class="nav-label">Dashboard</span>
+  </a>
+  <a href="/admin.html">
+    <span>&#x1F3AF;</span> <span class="nav-label">ROI Tool</span>
+  </a>
+  <a href="/history.html">
+    <span>&#x1F4CB;</span> <span class="nav-label">History</span>
+  </a>
+</nav>
 
 <script src="/static/app.js"></script>
 </body>

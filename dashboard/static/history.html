@@ -5,137 +5,47 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Violation History — CV Safety Monitor</title>
 <link rel="stylesheet" href="/static/style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
-  .history-container {
-    padding: 68px 20px 20px;
-    max-width: 1100px;
-    margin: 0 auto;
-  }
-  .history-container h2 {
-    font-size: 20px;
-    margin-bottom: 16px;
+  .cam-id-mono {
+    font-family: var(--font-mono);
     color: var(--accent-blue);
-  }
-  .filters {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-  .filters select, .filters input, .filters button {
-    background: var(--bg-card);
-    color: var(--text-primary);
-    border: 1px solid var(--border);
-    padding: 8px 12px;
-    border-radius: 6px;
-    font-size: 13px;
-  }
-  .filters button {
-    background: var(--accent-blue);
-    color: #000;
-    font-weight: 600;
-    cursor: pointer;
-    border: none;
-  }
-  .filters button:hover { opacity: 0.85; }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-  }
-  th, td {
-    text-align: left;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--border);
-  }
-  th {
-    color: var(--text-secondary);
-    font-weight: 600;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  tr:hover td { background: rgba(88, 166, 255, 0.04); }
-  .badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 700;
-  }
-  .badge-high { background: rgba(248, 81, 73, 0.2); color: var(--accent-red); }
-  .badge-medium { background: rgba(210, 153, 29, 0.2); color: var(--accent-orange); }
-  .thumbnail-sm {
-    width: 80px;
-    height: 60px;
-    object-fit: cover;
-    border-radius: 4px;
-    border: 1px solid var(--border);
-    cursor: pointer;
-  }
-  .empty-state {
-    text-align: center;
-    color: var(--text-secondary);
-    padding: 60px 0;
-    font-size: 15px;
-    display: none;
-  }
-  .pagination {
-    display: flex;
-    gap: 8px;
-    margin-top: 16px;
-    justify-content: center;
-  }
-  .pagination button {
-    background: var(--bg-card);
-    color: var(--text-primary);
-    border: 1px solid var(--border);
-    padding: 6px 14px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 13px;
-  }
-  .pagination button:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-  .pagination button.active {
-    background: var(--accent-blue);
-    border-color: var(--accent-blue);
-    color: #000;
-    font-weight: 600;
   }
 </style>
 </head>
 <body>
 
-<div id="alert-bar">
-  <span class="dot"></span>
-  <span class="title">CV Safety Monitor</span>
-  <span style="margin-left:auto;font-size:13px;color:var(--text-secondary)">Violation History</span>
-</div>
+<!-- Top Bar -->
+<header id="topbar">
+  <div class="logo">
+    <div class="icon">&#x1F3D7;</div>
+    <span>CV Safety Monitor</span>
+  </div>
+  <span class="page-label">Violation History</span>
+</header>
 
-<div class="history-container">
-  <h2>📋 Violation History</h2>
+<div class="page-container">
+  <h2>&#x1F4CB; Violation History</h2>
 
-  <div class="filters">
-    <select id="filter-camera">
+  <div class="filters-bar">
+    <select id="filter-camera" class="form-select">
       <option value="">All Cameras</option>
     </select>
-    <select id="filter-type">
+    <select id="filter-type" class="form-select">
       <option value="">All Types</option>
       <option value="FALL">FALL</option>
       <option value="NO_HELMET">NO_HELMET</option>
       <option value="NO_VEST">NO_VEST</option>
       <option value="NO_BOOT">NO_BOOT</option>
     </select>
-    <input type="date" id="filter-from" title="From date">
-    <input type="date" id="filter-to" title="To date">
-    <button onclick="HistoryPage.fetchPage(1)">🔍 Filter</button>
+    <input type="date" id="filter-from" class="form-input" title="From date">
+    <input type="date" id="filter-to" class="form-input" title="To date">
+    <button class="btn btn-primary" onclick="HistoryPage.fetchPage(1)">&#x1F50D; Filter</button>
   </div>
 
-  <table id="violations-table">
+  <table class="data-table" id="violations-table">
     <thead>
       <tr>
         <th>ID</th>
@@ -155,28 +65,38 @@
   <div class="pagination" id="pagination"></div>
 </div>
 
-<div id="nav">
-  <a href="/">📷 Dashboard</a>
-  <a href="/admin.html">⚙ ROI Tool</a>
-</div>
+<!-- Navigation Dock -->
+<nav id="nav-dock">
+  <a href="/">
+    <span>&#x1F4F7;</span> <span class="nav-label">Dashboard</span>
+  </a>
+  <a href="/admin.html">
+    <span>&#x1F3AF;</span> <span class="nav-label">ROI Tool</span>
+  </a>
+  <a href="/history.html" class="active">
+    <span>&#x1F4CB;</span> <span class="nav-label">History</span>
+  </a>
+</nav>
 
 <script>
-const HistoryPage = {
-  page: 1,
-  limit: 20,
+var HistoryPage = (function () {
+  'use strict';
 
-  async init() {
-    await this.loadCameras();
-    await this.fetchPage(1);
-  },
+  var page = 1;
+  var limit = 20;
 
-  async loadCameras() {
+  async function init() {
+    await loadCameras();
+    await fetchPage(1);
+  }
+
+  async function loadCameras() {
     try {
-      const resp = await fetch('/api/cameras');
-      const list = await resp.json();
-      const sel = document.getElementById('filter-camera');
-      list.forEach(cam => {
-        const opt = document.createElement('option');
+      var resp = await fetch('/api/cameras');
+      var list = await resp.json();
+      var sel = document.getElementById('filter-camera');
+      list.forEach(function (cam) {
+        var opt = document.createElement('option');
         opt.value = cam.id;
         opt.textContent = cam.id;
         sel.appendChild(opt);
@@ -184,18 +104,18 @@ const HistoryPage = {
     } catch (e) {
       console.warn('Failed to load cameras');
     }
-  },
+  }
 
-  async fetchPage(page) {
-    this.page = page;
-    const params = new URLSearchParams();
-    params.set('limit', String(this.limit));
-    params.set('offset', String((page - 1) * this.limit));
+  async function fetchPage(pg) {
+    page = pg;
+    var params = new URLSearchParams();
+    params.set('limit', String(limit));
+    params.set('offset', String((page - 1) * limit));
 
-    const cam = document.getElementById('filter-camera').value;
-    const type = document.getElementById('filter-type').value;
-    const from = document.getElementById('filter-from').value;
-    const to = document.getElementById('filter-to').value;
+    var cam = document.getElementById('filter-camera').value;
+    var type = document.getElementById('filter-type').value;
+    var from = document.getElementById('filter-from').value;
+    var to = document.getElementById('filter-to').value;
 
     if (cam) params.set('camera_id', cam);
     if (type) params.set('type', type);
@@ -203,52 +123,58 @@ const HistoryPage = {
     if (to) params.set('to_time', to + 'T23:59:59');
 
     try {
-      const resp = await fetch(`/api/violations?${params}`);
-      const data = await resp.json();
+      var resp = await fetch('/api/violations?' + params.toString());
+      var data = await resp.json();
 
-      const tbody = document.getElementById('table-body');
-      const empty = document.getElementById('empty-state');
+      var tbody = document.getElementById('table-body');
+      var empty = document.getElementById('empty-state');
 
       if (data.length === 0) {
         tbody.innerHTML = '';
         empty.style.display = 'block';
       } else {
         empty.style.display = 'none';
-        tbody.innerHTML = data.map(v => `
-          <tr>
-            <td>#${v.id}</td>
-            <td><span style="font-family:monospace;color:var(--accent-blue)">${v.camera_id}</span></td>
-            <td>${v.type}</td>
-            <td><span class="badge badge-${v.severity.toLowerCase()}">${v.severity}</span></td>
-            <td>${new Date(v.created_at).toLocaleString()}</td>
-            <td>
-              ${v.thumbnail_path
-                ? `<img class="thumbnail-sm" src="/api/violations/${v.id}/thumbnail"
-                     onclick="window.open('/api/violations/${v.id}/thumbnail')" alt="thumb">`
-                : '—'}
-            </td>
-          </tr>
-        `).join('');
+        tbody.innerHTML = data.map(function (v) {
+          var sevLower = (v.severity || 'medium').toLowerCase();
+          return '<tr>' +
+            '<td>#' + v.id + '</td>' +
+            '<td><span class="cam-id-mono">' + v.camera_id + '</span></td>' +
+            '<td>' + v.type + '</td>' +
+            '<td><span class="badge badge-' + sevLower + '">' + (v.severity || 'N/A') + '</span></td>' +
+            '<td>' + new Date(v.created_at).toLocaleString() + '</td>' +
+            '<td>' +
+              (v.thumbnail_path
+                ? '<img class="thumbnail-sm" src="/api/violations/' + v.id + '/thumbnail"' +
+                  ' onclick="window.open(\'/api/violations/' + v.id + '/thumbnail\')" alt="thumb">'
+                : '—') +
+            '</td>' +
+          '</tr>';
+        }).join('');
       }
 
-      this.renderPagination(data.length);
+      renderPagination(data.length);
     } catch (e) {
       console.error('Failed to fetch violations:', e);
     }
-  },
-
-  renderPagination(resultCount) {
-    const pag = document.getElementById('pagination');
-    const hasMore = resultCount >= this.limit;
-    const hasPrev = this.page > 1;
-
-    pag.innerHTML = `
-      <button ${hasPrev ? '' : 'disabled'} onclick="HistoryPage.fetchPage(${this.page - 1})">← Prev</button>
-      <button class="active">${this.page}</button>
-      <button ${hasMore ? '' : 'disabled'} onclick="HistoryPage.fetchPage(${this.page + 1})">Next →</button>
-    `;
   }
-};
+
+  function renderPagination(resultCount) {
+    var pag = document.getElementById('pagination');
+    var hasMore = resultCount >= limit;
+    var hasPrev = page > 1;
+
+    var html = '';
+    html += '<button ' + (hasPrev ? '' : 'disabled') + ' onclick="HistoryPage.fetchPage(' + (page - 1) + ')">← Prev</button>';
+    html += '<button class="active">' + page + '</button>';
+    html += '<button ' + (hasMore ? '' : 'disabled') + ' onclick="HistoryPage.fetchPage(' + (page + 1) + ')">Next →</button>';
+    pag.innerHTML = html;
+  }
+
+  return {
+    init: init,
+    fetchPage: fetchPage
+  };
+})();
 
 HistoryPage.init();
 </script>

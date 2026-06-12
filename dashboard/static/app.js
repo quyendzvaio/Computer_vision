@@ -1,165 +1,247 @@
 /**
- * CV Safety Monitor — Dashboard JS
- * Handles WebSocket connection, camera grid rendering, alert bar updates.
+ * CV Safety Monitor — Dashboard Client
+ * WebSocket realtime updates, camera grid, alert system, stats.
  */
 (function () {
   'use strict';
 
   // --- State ---
-  const cameras = {};       // camera_id -> { canvas, ctx, card }
+  const cameras = new Map();    // camera_id -> { canvas, ctx, card, badge, placeholder }
+  const violationCount = { today: 0 };
   let ws = null;
   let reconnectTimer = null;
+  const uptimeStart = Date.now();
+  let uptimeTimer = null;
 
-  // --- DOM ---
-  const grid = document.getElementById('camera-grid');
-  const alertBar = document.getElementById('alert-bar');
-  const statusDot = document.getElementById('status-dot');
-  const latestAlertEl = document.getElementById('latest-alert-text');
+  // --- DOM Cache ---
+  const $ = (sel) => document.querySelector(sel);
+  const grid = $('#camera-grid');
+  const alertBanner = $('#alert-banner');
+  const mainContent = $('#main-content');
+  const wsIndicator = $('#ws-indicator');
+  const statCameras = $('#stat-cameras');
+  const statViolations = $('#stat-violations');
+  const statActiveCameras = $('#stat-active-cameras');
+  const statTotalViolations = $('#stat-total-violations');
+  const statUptime = $('#stat-uptime');
+  const statRoiCount = $('#stat-roi-count');
+
+  // --- Uptime Timer ---
+  function updateUptime() {
+    const elapsed = Math.floor((Date.now() - uptimeStart) / 1000);
+    const h = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+    const m = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+    statUptime.textContent = h + ':' + m;
+  }
+  uptimeTimer = setInterval(updateUptime, 10000);
+  updateUptime();
 
   // --- WebSocket ---
   function connectWS() {
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${protocol}//${location.host}/ws/dashboard`;
-    ws = new WebSocket(url);
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws/dashboard');
 
-    ws.onopen = () => {
+    ws.onopen = function () {
       console.log('[WS] Connected');
-      statusDot.classList.remove('alarm');
+      wsIndicator.className = 'dot-indicator live';
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
       fetchCameras();
+      fetchViolationCount();
     };
 
-    ws.onmessage = (event) => {
+    ws.onmessage = function (event) {
       try {
-        const msg = JSON.parse(event.data);
-        handleMessage(msg);
+        handleMessage(JSON.parse(event.data));
       } catch (e) {
-        console.warn('[WS] Invalid message:', event.data);
+        console.warn('[WS] Bad message:', e);
       }
     };
 
-    ws.onclose = () => {
-      console.log('[WS] Disconnected — reconnecting in 3s');
-      statusDot.classList.add('alarm');
-      reconnectTimer = setTimeout(connectWS, 3000);
+    ws.onclose = function () {
+      console.log('[WS] Disconnected — reconnecting in 2s');
+      wsIndicator.className = 'dot-indicator warning';
+      reconnectTimer = setTimeout(connectWS, 2000);
     };
 
-    ws.onerror = (err) => {
-      console.error('[WS] Error:', err);
+    ws.onerror = function () {
+      // onclose fires after onerror, reconnect is handled there
     };
   }
 
-  // --- Message Handler ---
+  // --- Message Router ---
   function handleMessage(msg) {
     switch (msg.type) {
       case 'violation':
-        showAlert(msg.violation);
+        onViolation(msg.violation);
         break;
       case 'preview':
-        updatePreview(msg.camera_id, msg.frame_base64);
+        onPreview(msg.camera_id, msg.frame_base64);
         break;
-      default:
-        console.log('[WS] Unknown message type:', msg.type);
     }
   }
 
-  // --- Alert Bar ---
-  function showAlert(violation) {
-    // Flash the alert bar
-    alertBar.classList.remove('flash');
-    void alertBar.offsetWidth; // reflow
-    alertBar.classList.add('flash');
+  // --- Violation Handler ---
+  function onViolation(v) {
+    // Update counts
+    violationCount.today++;
+    updateViolationStats();
 
-    // Update latest alert text
-    const sevClass = violation.severity === 'HIGH' ? 'sev-high' : 'sev-medium';
-    latestAlertEl.innerHTML = `<span class="${sevClass}">[${violation.type}]</span> Camera ${violation.camera_id} — ${new Date(violation.timestamp).toLocaleTimeString()}`;
+    // Show alert banner
+    alertBanner.classList.add('active');
+    $('#alert-type').textContent = v.type.replace(/_/g, ' ');
+    $('#alert-camera').textContent = 'Camera: ' + v.camera_id;
+    $('#alert-time').textContent = new Date(v.timestamp).toLocaleTimeString();
+    mainContent.classList.add('alert-active');
+
+    // Auto-dismiss banner after 4s
+    clearTimeout(alertBanner._timeout);
+    alertBanner._timeout = setTimeout(function () {
+      alertBanner.classList.remove('active');
+      mainContent.classList.remove('alert-active');
+    }, 4000);
 
     // Flash the matching camera card
-    const card = document.querySelector(`[data-camera="${violation.camera_id}"]`);
-    if (card) {
-      const tag = card.querySelector('.violation-tag');
-      if (tag) {
-        tag.textContent = violation.type;
-        tag.classList.add('show');
-        setTimeout(() => tag.classList.remove('show'), 3000);
-      }
+    var cam = cameras.get(v.camera_id);
+    if (cam) {
+      cam.card.classList.add('violation-flash');
+      cam.badge.textContent = v.type;
+      cam.badge.classList.add('visible');
+      setTimeout(function () {
+        cam.card.classList.remove('violation-flash');
+      }, 1200);
+      setTimeout(function () {
+        cam.badge.classList.remove('visible');
+      }, 4000);
     }
-
-    // Auto-dismiss flash after animation
-    setTimeout(() => alertBar.classList.remove('flash'), 2000);
   }
 
-  // --- Preview Frame Update ---
-  function updatePreview(cameraId, base64Frame) {
-    let cam = cameras[cameraId];
+  // --- Preview Handler ---
+  function onPreview(cameraId, b64) {
+    var cam = cameras.get(cameraId);
     if (!cam) {
       cam = createCameraCard(cameraId);
-      cameras[cameraId] = cam;
+      cameras.set(cameraId, cam);
+      updateStats();
     }
 
-    const img = new Image();
-    img.onload = () => {
-      cam.canvas.width = img.width;
-      cam.canvas.height = img.height;
+    var img = new Image();
+    img.onload = function () {
+      cam.canvas.width = cam.canvas.naturalWidth || img.width;
+      cam.canvas.height = cam.canvas.naturalHeight || img.height;
       cam.ctx.drawImage(img, 0, 0);
+      // Hide placeholder on first frame
+      if (cam.placeholder) {
+        cam.placeholder.style.display = 'none';
+      }
     };
-    img.src = `data:image/jpeg;base64,${base64Frame}`;
+    img.src = 'data:image/jpeg;base64,' + b64;
   }
 
-  // --- Camera Grid ---
+  // --- Camera Card Factory ---
   function createCameraCard(cameraId) {
-    const card = document.createElement('div');
+    var card = document.createElement('div');
     card.className = 'camera-card';
     card.setAttribute('data-camera', cameraId);
 
-    const header = document.createElement('div');
-    header.className = 'header';
-    header.innerHTML = `
-      <span class="cam-id">&#x1F4F7; ${cameraId}</span>
-      <span class="status live">LIVE</span>
-    `;
+    card.innerHTML =
+      '<div class="card-header">' +
+        '<div class="cam-name">' +
+          '<span class="cam-icon">&#x1F4F7;</span>' +
+          '<span>' + cameraId + '</span>' +
+        '</div>' +
+        '<div class="cam-status live">' +
+          '<span class="pulse-dot"></span>' +
+          '<span>Live</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="canvas-wrap">' +
+        '<canvas></canvas>' +
+        '<div class="placeholder">' +
+          '<span class="cam-icon-lg">&#x1F4F7;</span>' +
+          '<span>Waiting for stream…</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="violation-badge"></div>';
 
-    const canvas = document.createElement('canvas');
-    canvas.width = 416;
-    canvas.height = 416;
-
-    const tag = document.createElement('div');
-    tag.className = 'violation-tag';
-
-    card.appendChild(header);
-    card.appendChild(canvas);
-    card.appendChild(tag);
     grid.appendChild(card);
 
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#1a1a2e';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#444';
-    ctx.font = '14px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('Waiting for stream...', canvas.width / 2, canvas.height / 2);
+    var canvas = card.querySelector('canvas');
+    var ctx = canvas.getContext('2d');
 
-    return { canvas, ctx, card };
+    // Initial dark background
+    canvas.width = 416;
+    canvas.height = 312;
+    ctx.fillStyle = '#0a0a0f';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    var badge = card.querySelector('.violation-badge');
+    var placeholder = card.querySelector('.placeholder');
+
+    return { canvas: canvas, ctx: ctx, card: card, badge: badge, placeholder: placeholder };
   }
 
-  // --- Fetch initial camera list ---
+  // --- Stats ---
+  function updateStats() {
+    statActiveCameras.textContent = cameras.size;
+    statCameras.textContent = cameras.size;
+  }
+
+  function updateViolationStats() {
+    statTotalViolations.textContent = violationCount.today;
+    statViolations.textContent = violationCount.today;
+  }
+
+  // --- API Calls ---
   async function fetchCameras() {
     try {
-      const resp = await fetch('/api/cameras');
-      const list = await resp.json();
-      list.forEach(cam => {
-        if (!cameras[cam.id]) {
-          cameras[cam.id] = createCameraCard(cam.id);
+      var resp = await fetch('/api/cameras');
+      var list = await resp.json();
+      list.forEach(function (cam) {
+        if (!cameras.has(cam.id)) {
+          cameras.set(cam.id, createCameraCard(cam.id));
         }
       });
+      updateStats();
     } catch (e) {
-      console.warn('Failed to fetch camera list:', e);
+      console.warn('Failed to load cameras:', e);
     }
   }
 
-  // --- Startup ---
+  async function fetchViolationCount() {
+    try {
+      var today = new Date().toISOString().split('T')[0];
+      var resp = await fetch('/api/violations?from_time=' + today + 'T00:00:00&to_time=' + today + 'T23:59:59&limit=1000');
+      var todayRows = await resp.json();
+      violationCount.today = Array.isArray(todayRows) ? todayRows.length : 0;
+      updateViolationStats();
+    } catch (e) {
+      console.warn('Failed to load violation count:', e);
+    }
+  }
+
+  async function fetchRoiCount() {
+    try {
+      var resp = await fetch('/api/cameras');
+      var camList = await resp.json();
+      var count = 0;
+      for (var i = 0; i < camList.length; i++) {
+        try {
+          var r = await fetch('/api/roi/' + camList[i].id);
+          if (r.ok) count++;
+        } catch (e) {
+          // ROI not found — skip
+        }
+      }
+      statRoiCount.textContent = count;
+    } catch (e) {
+      console.warn('Failed to load ROI count:', e);
+    }
+  }
+
+  // --- Init ---
   connectWS();
+  fetchRoiCount();
 })();
