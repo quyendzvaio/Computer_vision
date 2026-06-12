@@ -17,12 +17,6 @@ class Detection:
     conf: float
 
 
-@dataclass
-class KeypointResult:
-    """Pose keypoints for one person."""
-    keypoints: np.ndarray  # shape (17, 3) — (x, y, conf)
-    bbox: Tuple[float, float, float, float]
-
 
 class ModelManager:
     """Manages YOLO model loading and inference.
@@ -49,19 +43,16 @@ class ModelManager:
     def __init__(
         self,
         model_path: str = "models/yolov8n.onnx",
-        pose_model_path: Optional[str] = "models/yolov8n-pose.onnx",
         input_size: Tuple[int, int] = (416, 416),
         conf_threshold: float = 0.4,
         nms_threshold: float = 0.45,
     ):
         self.model_path = Path(model_path)
-        self.pose_model_path = Path(pose_model_path) if pose_model_path else None
         self.input_size = input_size
         self.conf_threshold = conf_threshold
         self.nms_threshold = nms_threshold
 
         self._session = None
-        self._pose_session = None
         self._use_openvino = False
 
     def load(self):
@@ -130,7 +121,7 @@ class ModelManager:
             return self._session.run(None, {input_name: tensor})[0]
 
     def postprocess(self, output: np.ndarray) -> List[Detection]:
-        """Convert YOLOv8 raw output to Detection objects with NMS."""
+        """Convert YOLOv8 raw output to Detection objects with per-class NMS."""
         if output.ndim == 3:
             output = output[0]
         output = output.transpose(1, 0)  # (8400, 84)
@@ -150,6 +141,8 @@ class ModelManager:
             cls_boxes = boxes[mask]
             cls_confs = cls_scores[mask]
 
+            cls_name = self.CLASS_NAMES[cls_id] if cls_id < len(self.CLASS_NAMES) else str(cls_id)
+            cls_detections = []
             for box, conf in zip(cls_boxes, cls_confs):
                 cx, cy, w, h = box
                 x1 = (cx - w / 2) * img_w
@@ -157,15 +150,16 @@ class ModelManager:
                 x2 = (cx + w / 2) * img_w
                 y2 = (cy + h / 2) * img_h
 
-                cls_name = self.CLASS_NAMES[cls_id] if cls_id < len(self.CLASS_NAMES) else str(cls_id)
-                detections.append(Detection(
+                cls_detections.append(Detection(
                     bbox=(x1, y1, x2, y2),
                     cls=cls_id,
                     cls_name=cls_name,
                     conf=float(conf),
                 ))
 
-        return self._nms(detections)
+            detections.extend(self._nms(cls_detections))
+
+        return detections
 
     def _nms(self, detections: List[Detection]) -> List[Detection]:
         """Apply Non-Maximum Suppression."""
