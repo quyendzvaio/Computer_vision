@@ -9,6 +9,7 @@ class LocalBridge:
 
     def __init__(self):
         self._queues: Dict[str, asyncio.Queue] = {}
+        self._loop = None
 
     def get_queue(self, camera_id: str, maxsize: int = 10) -> asyncio.Queue:
         """Get or create a queue for a camera."""

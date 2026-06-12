@@ -117,6 +117,7 @@ async def main_async(config_path: str = "edge/config.yaml"):
     if local_camera_ids or remote_camera_ids:
         from edge.local_bridge import LocalBridge
         local_bridge = LocalBridge()
+        local_bridge._loop = asyncio.get_running_loop()
         edge_thread = threading.Thread(
             target=run_edge_agent,
             args=(config, local_bridge, stop_event),
@@ -149,8 +150,12 @@ async def main_async(config_path: str = "edge/config.yaml"):
     from alert.cooldown import CooldownManager
     from alert.dispatcher import Dispatcher
 
+    roi = ROIMatcher(db=db_module)
+    import dashboard.server as dashboard_server
+    dashboard_server._roi_matcher = roi
+
     pipeline = AlertPipeline(
-        roi_matcher=ROIMatcher(db=db_module),
+        roi_matcher=roi,
         classifier=ViolationClassifier(),
         cooldown=CooldownManager(),
         dispatcher=Dispatcher(db=db_module),

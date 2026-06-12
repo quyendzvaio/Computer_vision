@@ -58,6 +58,7 @@ class ConnectionManager:
 
 
 ws_manager = ConnectionManager()
+_roi_matcher = None
 
 
 # --- Pydantic Schemas ---
@@ -113,6 +114,8 @@ async def api_put_roi(camera_id: str, payload: ROIPayload):
     """Save or update ROI polygon for a camera."""
     polygon = [(p[0], p[1]) for p in payload.polygon]
     save_roi(camera_id, polygon)
+    if _roi_matcher is not None:
+        _roi_matcher.invalidate(camera_id)
     return {"status": "ok", "camera_id": camera_id}
 
 
