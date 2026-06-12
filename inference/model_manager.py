@@ -1,7 +1,7 @@
 """OpenVINO model manager — loads YOLOv8 ONNX→IR models and runs inference."""
 import time
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 from dataclasses import dataclass
 
 import numpy as np
@@ -58,9 +58,15 @@ class ModelManager:
     def load(self):
         """Load the model. Tries OpenVINO first, falls back to ONNX Runtime."""
         try:
-            from openvino.runtime import Core
-            core = Core()
+            import openvino.runtime as ov
+        except ImportError:
+            print("[ModelManager] OpenVINO not available, using ONNX Runtime fallback")
+            self._load_onnx()
+            self._warmup()
+            return
 
+        try:
+            core = ov.Core()
             ir_path = self.model_path.with_suffix('.xml')
             if ir_path.exists():
                 model = core.read_model(str(ir_path))
@@ -74,10 +80,7 @@ class ModelManager:
                 print(f"[ModelManager] Loaded ONNX model via OpenVINO from {self.model_path}")
             else:
                 raise FileNotFoundError(f"Model not found: {self.model_path}")
-        except ImportError:
-            print("[ModelManager] OpenVINO not available, using ONNX Runtime fallback")
-            self._load_onnx()
-        except Exception as e:
+        except (FileNotFoundError, RuntimeError) as e:
             print(f"[ModelManager] OpenVINO failed ({e}), falling back to ONNX Runtime")
             self._load_onnx()
 
@@ -96,7 +99,8 @@ class ModelManager:
         """Run a dummy inference to warm up the model."""
         dummy = np.random.randn(1, 3, *self.input_size).astype(np.float32)
         if self._use_openvino:
-            self._session([dummy])
+            infer_request = self._session.create_infer_request()
+            infer_request.infer([dummy])
         else:
             input_name = self._session.get_inputs()[0].name
             self._session.run(None, {input_name: dummy})
@@ -113,6 +117,8 @@ class ModelManager:
 
     def inference(self, tensor: np.ndarray) -> np.ndarray:
         """Run inference on a preprocessed tensor. Returns raw model output."""
+        if self._session is None:
+            raise RuntimeError("Model not loaded. Call load() before inference().")
         if self._use_openvino:
             result = self._session([tensor])
             return result[0] if isinstance(result, (list, tuple)) else result
@@ -181,6 +187,8 @@ class ModelManager:
 
     def detect(self, frame_bgr: np.ndarray) -> List[Detection]:
         """Full pipeline: preprocess → inference → postprocess."""
+        if self._session is None:
+            raise RuntimeError("Model not loaded. Call load() before detect().")
         tensor = self.preprocess(frame_bgr)
         output = self.inference(tensor)
         return self.postprocess(output)
