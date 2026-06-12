@@ -1,27 +1,30 @@
 """Detector — wraps ModelManager to produce DetectionResult objects."""
 from datetime import datetime
-from typing import Optional
-
-import numpy as np
 
 from inference.model_manager import ModelManager
 from shared.models import DetectionResult, DetectedObject, BBox
 
 
 class Detector:
-    """Converts raw model detections into structured DetectionResult objects.
-    Handles both object detection and pose estimation (via separate model)."""
+    """Converts raw model detections into structured DetectionResult objects."""
 
     def __init__(self, model_manager: ModelManager):
         self.mm = model_manager
 
     def run(self, jpeg_bytes: bytes, camera_id: str) -> DetectionResult:
         """Run detection on a JPEG frame and return structured result."""
-        frame = self.mm.preprocess_jpeg(jpeg_bytes)
+        try:
+            frame = self.mm.preprocess_jpeg(jpeg_bytes)
+        except Exception:
+            return DetectionResult(camera_id=camera_id)
+
         if frame is None:
             return DetectionResult(camera_id=camera_id)
 
-        detections = self.mm.detect(frame)
+        try:
+            detections = self.mm.detect(frame)
+        except Exception:
+            return DetectionResult(camera_id=camera_id)
 
         objects = [
             DetectedObject(
@@ -35,6 +38,6 @@ class Detector:
         return DetectionResult(
             camera_id=camera_id,
             objects=objects,
-            keypoints=None,  # Pose model integration: Task 17
+            keypoints=None,
             timestamp=datetime.now(),
         )

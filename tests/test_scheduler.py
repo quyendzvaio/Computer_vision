@@ -77,3 +77,27 @@ def test_scheduler_mixed_empty():
     assert result is not None
     cam_id, frame = result
     assert cam_id == "cam-02"
+
+
+def test_scheduler_queue_overflow():
+    """When more than 5 frames are added, oldest frames should be evicted."""
+    from inference.scheduler import Scheduler
+
+    sched = Scheduler()
+    sched.register_camera("cam-01")
+
+    # Add 7 frames (maxlen=5, so first 2 should be dropped)
+    for i in range(7):
+        sched.add_frame("cam-01", f"frame{i}".encode())
+
+    # The queue should have exactly 5 frames (frames 2-6)
+    # Poll 5 times, should get frames 2, 3, 4, 5, 6
+    for expected in range(2, 7):
+        result = sched.poll()
+        assert result is not None
+        cam_id, frame = result
+        assert cam_id == "cam-01"
+        assert frame == f"frame{expected}".encode()
+
+    # 6th poll should return None (all empty)
+    assert sched.poll() is None

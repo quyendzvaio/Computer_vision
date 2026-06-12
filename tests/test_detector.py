@@ -48,3 +48,21 @@ def test_detector_empty_frame():
 
     assert len(result.objects) == 0
     assert result.camera_id == "cam-01"
+
+
+def test_detector_corrupt_jpeg_returns_empty():
+    """Detector should return empty DetectionResult when JPEG decoding fails."""
+    from inference.detector import Detector
+
+    mock_mm = MagicMock()
+    mock_mm.preprocess_jpeg.return_value = None
+
+    detector = Detector(mock_mm)
+
+    result = detector.run(b"corrupt_bytes", "cam-01")
+
+    assert isinstance(result, DetectionResult)
+    assert result.camera_id == "cam-01"
+    assert len(result.objects) == 0
+    # detect() should NOT have been called since frame is None
+    mock_mm.detect.assert_not_called()
