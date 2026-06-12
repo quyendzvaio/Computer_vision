@@ -1,12 +1,16 @@
-"""Shared data models used across all subsystems."""
+"""Shared data models used across all subsystems.
+
+Coordinate convention: All bounding box and keypoint coordinates are in
+PIXEL space (image coordinates), not normalized. x=0,y=0 is top-left.
+"""
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 
 
 @dataclass
 class BBox:
-    """Bounding box [x1, y1, x2, y2] normalized or pixel coords."""
+    """Bounding box [x1, y1, x2, y2] in pixel coordinates."""
     x1: float
     y1: float
     x2: float
@@ -14,6 +18,7 @@ class BBox:
 
     @property
     def center(self) -> Tuple[float, float]:
+        """Center point (cx, cy) in pixel coordinates."""
         return ((self.x1 + self.x2) / 2, (self.y1 + self.y2) / 2)
 
     @property
@@ -26,7 +31,22 @@ class BBox:
 
     @property
     def aspect_ratio(self) -> float:
+        """width/height ratio. Returns 0.0 if height is 0."""
         return self.width / self.height if self.height > 0 else 0.0
+
+    def to_list(self) -> List[float]:
+        """Serialize to [x1, y1, x2, y2]."""
+        return [self.x1, self.y1, self.x2, self.y2]
+
+    @classmethod
+    def from_list(cls, coords: List[float]) -> "BBox":
+        """Deserialize from [x1, y1, x2, y2]."""
+        return cls(coords[0], coords[1], coords[2], coords[3])
+
+
+# Type aliases for violation classification
+ViolationType = Literal["FALL", "NO_HELMET", "NO_VEST", "NO_BOOT"]
+SeverityLevel = Literal["HIGH", "MEDIUM"]
 
 
 @dataclass
@@ -39,10 +59,10 @@ class DetectedObject:
 
 @dataclass
 class Keypoint:
-    """Single pose keypoint."""
-    x: float
-    y: float
-    conf: float        # visibility confidence
+    """Single pose keypoint in pixel coordinates."""
+    x: float        # pixel x-coordinate
+    y: float        # pixel y-coordinate
+    conf: float     # visibility confidence 0-1
 
 
 @dataclass
@@ -59,16 +79,24 @@ class Violation:
     """A confirmed safety violation after ROI + cooldown checks."""
     id: Optional[int] = None
     camera_id: str = ""
-    type: str = ""           # FALL | NO_HELMET | NO_VEST | NO_BOOT
-    severity: str = "MEDIUM"  # HIGH | MEDIUM
-    bbox: List[float] = field(default_factory=list)   # [x1, y1, x2, y2]
+    type: ViolationType = "NO_HELMET"
+    severity: SeverityLevel = "MEDIUM"
+    bbox: BBox = field(default_factory=lambda: BBox(0, 0, 0, 0))
     thumbnail_path: str = ""
     timestamp: datetime = field(default_factory=datetime.now)
 
 
 @dataclass
 class ROIConfig:
-    """ROI polygon configuration for one camera."""
+    """ROI polygon configuration for one camera.
+
+    Polygon is a list of [x, y] coordinate pairs in pixel coordinates.
+    Use `to_point_tuples()` to get Shapely-compatible (x, y) tuples.
+    """
     camera_id: str
-    polygon: List[Tuple[float, float]]  # [(x,y), (x,y), ...]
+    polygon: List[List[float]]  # [[x, y], [x, y], ...]
     updated_at: datetime = field(default_factory=datetime.now)
+
+    def to_point_tuples(self) -> List[Tuple[float, float]]:
+        """Return polygon as List[Tuple[float, float]] for Shapely."""
+        return [(float(p[0]), float(p[1])) for p in self.polygon]

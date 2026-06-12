@@ -1,25 +1,29 @@
-import os
 import tempfile
-import pytest
 from pathlib import Path
+
+import pytest
+
+from shared.models import BBox, DetectedObject, DetectionResult, Violation
 
 
 @pytest.fixture
 def temp_dir():
-    """Temporary directory that cleans up after test."""
+    """Temporary directory that cleans up after test.
+
+    Note: The directory is destroyed on fixture teardown. Tests should
+    not store the path for use outside the fixture scope.
+    """
     with tempfile.TemporaryDirectory() as d:
         yield Path(d)
 
 
 @pytest.fixture
 def sample_bbox():
-    from shared.models import BBox
     return BBox(100, 200, 300, 400)
 
 
 @pytest.fixture
 def sample_detection():
-    from shared.models import DetectionResult, DetectedObject, BBox
     return DetectionResult(
         camera_id="cam-01",
         objects=[
@@ -33,10 +37,9 @@ def sample_detection():
 
 @pytest.fixture
 def sample_violation():
-    from shared.models import Violation
     return Violation(
         camera_id="cam-01",
         type="NO_HELMET",
         severity="HIGH",
-        bbox=[100, 100, 200, 300],
+        bbox=BBox(100, 100, 200, 300),
     )
