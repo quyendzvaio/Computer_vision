@@ -142,6 +142,7 @@ async def main_async(config_path: str = "edge/config.yaml"):
 
     # Alert Pipeline
     import alert.db as db_module
+    db_module.init_db()
     from alert import AlertPipeline
     from alert.roi_matcher import ROIMatcher
     from alert.classifier import ViolationClassifier
@@ -149,7 +150,7 @@ async def main_async(config_path: str = "edge/config.yaml"):
     from alert.dispatcher import Dispatcher
 
     pipeline = AlertPipeline(
-        roi_matcher=ROIMatcher(),
+        roi_matcher=ROIMatcher(db=db_module),
         classifier=ViolationClassifier(),
         cooldown=CooldownManager(),
         dispatcher=Dispatcher(db=db_module),
@@ -165,6 +166,7 @@ async def main_async(config_path: str = "edge/config.yaml"):
     from inference.mqtt_subscriber import MQTTSubscriber
 
     # Local receiver
+    local_receiver = None
     if local_camera_ids and local_bridge:
         local_receiver = LocalReceiver(local_bridge)
         await local_receiver.start(
@@ -180,10 +182,14 @@ async def main_async(config_path: str = "edge/config.yaml"):
             broker=config.get("mqtt", {}).get("broker", "localhost"),
             port=config.get("mqtt", {}).get("port", 1883),
         )
-        mqtt_sub.connect(
-            on_frame=lambda cid, jpeg: scheduler.add_frame(cid, jpeg),
-        )
-        print(f"[Main] MQTT subscriber started for {remote_camera_ids}")
+        try:
+            mqtt_sub.connect(
+                on_frame=lambda cid, jpeg: scheduler.add_frame(cid, jpeg),
+            )
+            print(f"[Main] MQTT subscriber started for {remote_camera_ids}")
+        except ConnectionError:
+            print(f"[Main] Warning: Could not connect to MQTT broker, skipping remote cameras")
+            mqtt_sub = None
 
     # Start dashboard
     dashboard_task = asyncio.create_task(run_dashboard(pipeline))
@@ -196,6 +202,8 @@ async def main_async(config_path: str = "edge/config.yaml"):
         pass
     finally:
         print("[Main] Shutting down...")
+        if local_receiver:
+            await local_receiver.stop()
         if mqtt_sub:
             mqtt_sub.disconnect()
         stop_event.set()
