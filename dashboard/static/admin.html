@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROI Tool — CV Safety Monitor</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .admin-container {
+    padding: 68px 20px 20px;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  .admin-container h2 {
+    font-size: 20px;
+    margin-bottom: 16px;
+    color: var(--accent-blue);
+  }
+  .controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .controls select {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+  }
+  .controls button {
+    background: var(--accent-blue);
+    color: #000;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  .controls button:hover { opacity: 0.85; }
+  .controls button.danger {
+    background: var(--accent-red);
+    color: #fff;
+  }
+  .controls button.secondary {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+  }
+  #roi-canvas-wrap {
+    position: relative;
+    display: inline-block;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  #roi-canvas {
+    display: block;
+    max-width: 100%;
+    cursor: crosshair;
+  }
+  .help-text {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+  .help-text kbd {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--accent-green);
+    color: #000;
+    padding: 10px 24px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: 9999;
+  }
+  .toast.show { opacity: 1; }
+  .toast.error { background: var(--accent-red); color: #fff; }
+</style>
+</head>
+<body>
+
+<div id="alert-bar">
+  <span class="dot"></span>
+  <span class="title">CV Safety Monitor</span>
+  <span style="margin-left:auto;font-size:13px;color:var(--text-secondary)">ROI Configuration Tool</span>
+</div>
+
+<div class="admin-container">
+  <h2>🎯 ROI Polygon Tool</h2>
+
+  <div class="controls">
+    <select id="camera-select">
+      <option value="">— Select Camera —</option>
+    </select>
+    <button onclick="ROITool.loadROI()">📥 Load Saved ROI</button>
+    <button onclick="ROITool.saveROI()">💾 Save ROI</button>
+    <button class="secondary" onclick="ROITool.undoPoint()">↩ Undo Point</button>
+    <button class="danger" onclick="ROITool.clearROI()">✕ Clear</button>
+  </div>
+
+  <div id="roi-canvas-wrap">
+    <canvas id="roi-canvas" width="640" height="480"></canvas>
+  </div>
+
+  <div class="help-text">
+    <strong>Instructions:</strong><br>
+    <kbd>Click</kbd> — Add polygon vertex &nbsp;
+    <kbd>Drag</kbd> — Move a vertex &nbsp;
+    <kbd>Right-click</kbd> — Remove vertex &nbsp;
+    <kbd>Double-click</kbd> — Close polygon<br>
+    Select a camera above, then draw the ROI polygon on the preview.
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div id="nav">
+  <a href="/">📷 Dashboard</a>
+  <a href="/history.html">📋 History</a>
+</div>
+
+<script>
+/**
+ * ROI Polygon Drawing Tool
+ */
+const ROITool = {
+  canvas: document.getElementById('roi-canvas'),
+  ctx: document.getElementById('roi-canvas').getContext('2d'),
+  points: [],
+  dragIdx: -1,
+
+  init() {
+    this.canvas.addEventListener('click', (e) => this.onClick(e));
+    this.canvas.addEventListener('dblclick', (e) => this.onDblClick(e));
+    this.canvas.addEventListener('contextmenu', (e) => this.onRightClick(e));
+    this.canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
+    this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
+    this.canvas.addEventListener('mouseup', () => { this.dragIdx = -1; });
+    this.loadCameras();
+    this.draw();
+  },
+
+  getPos(e) {
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = this.canvas.width / rect.width;
+    const scaleY = this.canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+  },
+
+  findPoint(pos, radius = 10) {
+    for (let i = 0; i < this.points.length; i++) {
+      const dx = this.points[i].x - pos.x;
+      const dy = this.points[i].y - pos.y;
+      if (Math.sqrt(dx * dx + dy * dy) < radius) return i;
+    }
+    return -1;
+  },
+
+  onClick(e) {
+    const pos = this.getPos(e);
+    if (this.findPoint(pos) >= 0) return;
+    if (this.points.length > 0 && this.points[0].closed) return;
+    this.points.push({ x: pos.x, y: pos.y, closed: false });
+    this.draw();
+  },
+
+  onDblClick(e) {
+    if (this.points.length < 3) return;
+    this.points[0].closed = true;
+    this.draw();
+  },
+
+  onRightClick(e) {
+    e.preventDefault();
+    const pos = this.getPos(e);
+    const idx = this.findPoint(pos);
+    if (idx >= 0) {
+      this.points.splice(idx, 1);
+      if (this.points.length > 0) this.points[0].closed = false;
+      this.draw();
+    }
+  },
+
+  onMouseDown(e) {
+    const pos = this.getPos(e);
+    const idx = this.findPoint(pos);
+    if (idx >= 0) {
+      this.dragIdx = idx;
+    }
+  },
+
+  onMouseMove(e) {
+    if (this.dragIdx < 0) return;
+    const pos = this.getPos(e);
+    this.points[this.dragIdx].x = pos.x;
+    this.points[this.dragIdx].y = pos.y;
+    this.draw();
+  },
+
+  undoPoint() {
+    if (this.points.length === 0) return;
+    this.points.pop();
+    if (this.points.length > 0) this.points[0].closed = false;
+    this.draw();
+  },
+
+  clearROI() {
+    this.points = [];
+    this.draw();
+  },
+
+  draw() {
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+    // Dark background with grid
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 0.5;
+    for (let x = 0; x < this.canvas.width; x += 40) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, this.canvas.height); ctx.stroke();
+    }
+    for (let y = 0; y < this.canvas.height; y += 40) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(this.canvas.width, y); ctx.stroke();
+    }
+
+    if (this.points.length < 2) {
+      this.points.forEach(p => this.drawPoint(p));
+      return;
+    }
+
+    // Polygon lines
+    ctx.beginPath();
+    ctx.moveTo(this.points[0].x, this.points[0].y);
+    for (let i = 1; i < this.points.length; i++) {
+      ctx.lineTo(this.points[i].x, this.points[i].y);
+    }
+    if (this.points[0].closed) {
+      ctx.closePath();
+    }
+    ctx.strokeStyle = '#58a6ff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Fill
+    if (this.points[0].closed && this.points.length >= 3) {
+      ctx.fillStyle = 'rgba(88, 166, 255, 0.1)';
+      ctx.fill();
+    }
+
+    this.points.forEach(p => this.drawPoint(p));
+  },
+
+  drawPoint(p) {
+    const ctx = this.ctx;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#58a6ff';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  },
+
+  async loadCameras() {
+    try {
+      const resp = await fetch('/api/cameras');
+      const list = await resp.json();
+      const sel = document.getElementById('camera-select');
+      list.forEach(cam => {
+        const opt = document.createElement('option');
+        opt.value = cam.id;
+        opt.textContent = cam.id;
+        sel.appendChild(opt);
+      });
+    } catch (e) {
+      this.showToast('Failed to load cameras', true);
+    }
+  },
+
+  async loadROI() {
+    const camId = document.getElementById('camera-select').value;
+    if (!camId) {
+      this.showToast('Select a camera first', true);
+      return;
+    }
+    try {
+      const resp = await fetch(`/api/roi/${camId}`);
+      if (!resp.ok) {
+        this.showToast('No ROI saved for this camera yet', true);
+        return;
+      }
+      const data = await resp.json();
+      this.points = data.polygon.map(p => ({ x: p[0], y: p[1], closed: false }));
+      if (this.points.length >= 3) {
+        this.points[0].closed = true;
+      }
+      this.draw();
+      this.showToast('ROI loaded');
+    } catch (e) {
+      this.showToast('Failed to load ROI', true);
+    }
+  },
+
+  async saveROI() {
+    const camId = document.getElementById('camera-select').value;
+    if (!camId) {
+      this.showToast('Select a camera first', true);
+      return;
+    }
+    if (this.points.length < 3 || !this.points[0].closed) {
+      this.showToast('Draw a closed polygon first (at least 3 points, double-click to close)', true);
+      return;
+    }
+    const polygon = this.points.map(p => [Math.round(p.x), Math.round(p.y)]);
+    try {
+      const resp = await fetch(`/api/roi/${camId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ polygon }),
+      });
+      if (resp.ok) {
+        this.showToast('ROI saved ✓');
+      } else {
+        this.showToast('Failed to save ROI', true);
+      }
+    } catch (e) {
+      this.showToast('Failed to save ROI', true);
+    }
+  },
+
+  showToast(msg, isError = false) {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.className = 'toast' + (isError ? ' error' : '');
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2500);
+  }
+};
+
+ROITool.init();
+</script>
+</body>
+</html>
