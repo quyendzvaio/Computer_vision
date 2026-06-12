@@ -104,6 +104,15 @@ async def main_async(config_path: str = "edge/config.yaml"):
     """Async main — wires everything together."""
     config = load_config(config_path)
 
+    stop_event = threading.Event()
+
+    # Docker sends SIGTERM for graceful shutdown — route through stop_event
+    loop = asyncio.get_running_loop()
+    try:
+        loop.add_signal_handler(signal.SIGTERM, lambda: stop_event.set())
+    except NotImplementedError:
+        pass  # Signal handlers not supported on this platform
+
     # Create shared infrastructure
     local_bridge = None
     local_camera_ids = []
@@ -116,8 +125,6 @@ async def main_async(config_path: str = "edge/config.yaml"):
             local_camera_ids.append(cid)
         else:
             remote_camera_ids.append(cid)
-
-    stop_event = threading.Event()
 
     # Edge Agent (handles both local and remote cameras)
     if local_camera_ids or remote_camera_ids:
@@ -229,24 +236,11 @@ async def main_async(config_path: str = "edge/config.yaml"):
 def main():
     """Entry point — handles signals and runs the async main."""
     config_path = sys.argv[1] if len(sys.argv) > 1 else "edge/config.yaml"
-
-    loop = asyncio.new_event_loop()
-
-    def sig_handler():
-        print("\n[Main] Received SIGINT, shutting down...")
-        for task in asyncio.all_tasks(loop):
-            task.cancel()
-
-    loop.add_signal_handler(signal.SIGINT, sig_handler)
-    loop.add_signal_handler(signal.SIGTERM, sig_handler)
-
     try:
-        loop.run_until_complete(main_async(config_path))
+        asyncio.run(main_async(config_path))
     except KeyboardInterrupt:
         pass
-    finally:
-        loop.close()
-        print("[Main] Goodbye.")
+    print("[Main] Goodbye.")
 
 
 if __name__ == "__main__":
