@@ -45,6 +45,9 @@ class LocalReceiver:
     async def stop(self):
         """Stop all receiver tasks."""
         self._running = False
-        for task in self._tasks.values():
+        tasks = list(self._tasks.values())
+        for task in tasks:
             task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks.clear()
