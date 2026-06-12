@@ -27,10 +27,16 @@ class EdgeAgent:
         self.local_bridge = local_bridge
 
     def start_mqtt(self):
-        """Connect to MQTT broker for remote cameras."""
-        self.mqtt = MQTTPublisher(self.config)
-        self.mqtt.connect()
-        self.mqtt.set_active_cameras(list(self.source_manager.cameras.keys()))
+        """Connect to MQTT broker for remote cameras.
+        Connection failure is logged, not raised — MQTT is optional."""
+        try:
+            self.mqtt = MQTTPublisher(self.config)
+            self.mqtt.connect()
+            self.mqtt.set_active_cameras(list(self.source_manager.cameras.keys()))
+            print("[EdgeAgent] MQTT connected")
+        except ConnectionError as e:
+            print(f"[EdgeAgent] MQTT not available ({e}), remote cameras will not work")
+            self.mqtt = None
 
     def start_all_cameras(self):
         """Start capturing from all configured cameras.

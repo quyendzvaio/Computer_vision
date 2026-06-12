@@ -93,11 +93,8 @@ def run_edge_agent(config, local_bridge, stop_event):
 
         agent.stop()
     except Exception as e:
-        print(f"[Main] Edge agent fatal error: {e}")
-        import traceback
-        traceback.print_exc()
-        # Signal the main loop to stop since we have no cameras
-        stop_event.set()
+        print(f"[Main] Edge agent error ({e}) — dashboard will remain active")
+        # Dashboard and API stay up even if edge agent fails
 
 
 async def main_async(config_path: str = "edge/config.yaml"):
