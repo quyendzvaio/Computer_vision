@@ -1,0 +1,23 @@
+mqtt:
+  broker: localhost
+  port: 1883
+  client_id: edge-agent-01
+
+cameras:
+  - id: cam-usb-01
+    source: 0                          # USB device index
+    roi: [[0, 0], [640, 0], [640, 480], [0, 480]]  # full frame default
+  - id: cam-rtsp-01
+    source: rtsp://192.168.1.100:554/stream1
+    roi: [[100, 50], [500, 50], [500, 400], [100, 400]]
+
+frame:
+  target_fps: 5                        # frames per second to send
+  resize_width: 416
+  resize_height: 416
+  jpeg_quality: 70
+  motion_threshold: 0.05               # skip if frame diff < 5%
+
+topics:
+  frame: cv/{camera_id}/frame
+  heartbeat: cv/{camera_id}/heartbeat
