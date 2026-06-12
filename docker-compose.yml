@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  cv-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cv-safety-monitor:latest
+    container_name: cv-monitor
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models:ro
+      - ./edge/config.yaml:/app/edge/config.yaml:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Optional: uncomment if using Mosquitto
+    # depends_on:
+    #   - mqtt
+
+  # Optional MQTT broker for remote cameras
+  # mqtt:
+  #   image: eclipse-mosquitto:2
+  #   container_name: cv-mqtt
+  #   restart: unless-stopped
+  #   ports:
+  #     - "1883:1883"
+  #   volumes:
+  #     - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
