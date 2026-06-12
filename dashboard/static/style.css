@@ -1,0 +1,202 @@
+/* === CV Safety Monitor — Dark Theme === */
+:root {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-card: #1c2333;
+  --border: #30363d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --accent-green: #3fb950;
+  --accent-red: #f85149;
+  --accent-orange: #d2991d;
+  --accent-blue: #58a6ff;
+  --font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow-x: hidden;
+}
+
+/* === Alert Bar === */
+#alert-bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 52px;
+  background: var(--bg-secondary);
+  border-bottom: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  z-index: 1000;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+#alert-bar.flash {
+  border-bottom-color: var(--accent-red);
+  background: #1a1015;
+  animation: flash-border 0.5s ease-in-out 3;
+}
+
+@keyframes flash-border {
+  0%, 100% { border-bottom-color: var(--accent-red); }
+  50% { border-bottom-color: transparent; }
+}
+
+#alert-bar .dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  margin-right: 12px;
+  transition: background 0.2s;
+}
+
+#alert-bar .dot.alarm {
+  background: var(--accent-red);
+  animation: pulse-dot 0.5s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.5); opacity: 0.6; }
+}
+
+#alert-bar .title {
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.5px;
+}
+
+#alert-bar .latest-alert {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+#alert-bar .latest-alert .sev-high {
+  color: var(--accent-red);
+  font-weight: 700;
+}
+
+#alert-bar .latest-alert .sev-medium {
+  color: var(--accent-orange);
+}
+
+/* === Camera Grid === */
+#camera-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 16px;
+  padding: 68px 16px 16px;
+  min-height: calc(100vh - 52px);
+}
+
+.camera-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+}
+
+.camera-card .header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.camera-card .header .cam-id {
+  color: var(--accent-blue);
+  font-family: var(--font-mono);
+}
+
+.camera-card .header .status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.camera-card .header .status.live {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--accent-green);
+}
+
+.camera-card .header .status.offline {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--accent-red);
+}
+
+.camera-card canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4/3;
+  background: #000;
+  object-fit: contain;
+}
+
+.camera-card .violation-tag {
+  position: absolute;
+  top: 8px; right: 8px;
+  background: var(--accent-red);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.camera-card .violation-tag.show {
+  opacity: 1;
+}
+
+/* === Nav === */
+#nav {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  gap: 8px;
+  z-index: 900;
+}
+
+#nav a {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 8px 16px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 13px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+#nav a:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-blue);
+}
+
+/* === Responsive === */
+@media (max-width: 900px) {
+  #camera-grid {
+    grid-template-columns: 1fr;
+  }
+}
