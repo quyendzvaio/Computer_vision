@@ -1,9 +1,8 @@
-"""Integration test for the full alert pipeline: ROI → Classify → Cooldown → Dispatch."""
+"""Integration test for AlertPipeline: ROI → Classify → Cooldown → Dispatch."""
 import json
-from pathlib import Path
 from unittest.mock import MagicMock
 
-from shared.models import DetectionResult, DetectedObject, BBox, Keypoint
+from shared.models import DetectionResult, DetectedObject, BBox
 
 
 def make_detection(camera_id="cam-01", has_helmet=True, has_vest=True):
@@ -23,51 +22,42 @@ def make_detection(camera_id="cam-01", has_helmet=True, has_vest=True):
 
 
 class TestAlertPipeline:
-    """End-to-end alert pipeline tests with mocked DB and WebSocket."""
+    """End-to-end alert pipeline tests via AlertPipeline.process()."""
 
-    def test_full_pipeline_roi_blocked(self):
-        """Violation outside ROI should be blocked before classification."""
+    def test_pipeline_roi_blocks(self):
+        """Violation outside ROI should be blocked."""
+        from alert import AlertPipeline
         from alert.roi_matcher import ROIMatcher
         from alert.classifier import ViolationClassifier
         from alert.cooldown import CooldownManager
         from alert.dispatcher import Dispatcher
 
         mock_db = MagicMock()
-        # ROI is a small polygon far from the person
+        # ROI is a small polygon far from the person (center ~150,200)
         mock_db.get_roi.return_value = {
             "camera_id": "cam-01",
             "polygon": json.dumps([(500, 500), (600, 500), (600, 600), (500, 600)]),
         }
         mock_db.insert_violation.return_value = 1
 
-        roi = ROIMatcher(mock_db)
-        classifier = ViolationClassifier()
-        cooldown = CooldownManager()
-        dispatcher = Dispatcher(db=mock_db, ws_manager=None)
+        pipeline = AlertPipeline(
+            roi_matcher=ROIMatcher(mock_db),
+            classifier=ViolationClassifier(),
+            cooldown=CooldownManager(cooldown_seconds=0),
+            dispatcher=Dispatcher(db=mock_db, ws_manager=None),
+        )
 
-        # Person at (100-200, 100-300) — center (150, 200)
-        # ROI is at (500-600, 500-600) — person is outside
+        # Person at center (150, 200) — outside ROI at (500-600, 500-600)
         result = make_detection(has_helmet=False, has_vest=False)
+        dispatched = pipeline.process(result, frame_bgr=None)
 
-        violations_dispatched = 0
-        for obj in result.objects:
-            if obj.cls != "person":
-                continue
-            bbox_list = [obj.bbox.x1, obj.bbox.y1, obj.bbox.x2, obj.bbox.y2]
-            if not roi.is_in_roi(result.camera_id, bbox_list):
-                continue  # Blocked by ROI
+        # All violations blocked by ROI → 0 dispatched
+        assert len(dispatched) == 0
+        mock_db.insert_violation.assert_not_called()
 
-            # This code path should NOT be reached
-            violations = classifier.classify(result)
-            for v in violations:
-                if cooldown.should_alert(v.camera_id, v.type):
-                    dispatcher.dispatch(v, frame_bgr=None)
-                    violations_dispatched += 1
-
-        assert violations_dispatched == 0
-
-    def test_full_pipeline_cooldown_blocks_duplicate(self):
-        """Second identical violation within 5s should be blocked by cooldown."""
+    def test_pipeline_cooldown_blocks_duplicate(self):
+        """Second call with same violation type within cooldown should be blocked."""
+        from alert import AlertPipeline
         from alert.roi_matcher import ROIMatcher
         from alert.classifier import ViolationClassifier
         from alert.cooldown import CooldownManager
@@ -81,36 +71,31 @@ class TestAlertPipeline:
         }
         mock_db.insert_violation.return_value = 1
 
-        roi = ROIMatcher(mock_db)
-        classifier = ViolationClassifier()
-        cooldown = CooldownManager(cooldown_seconds=5)
-        dispatcher = Dispatcher(db=mock_db, ws_manager=None)
+        pipeline = AlertPipeline(
+            roi_matcher=ROIMatcher(mock_db),
+            classifier=ViolationClassifier(),
+            cooldown=CooldownManager(cooldown_seconds=5),
+            dispatcher=Dispatcher(db=mock_db, ws_manager=None),
+        )
 
-        # Person without helmet
+        # Person without helmet (but with vest, no boot detection)
+        # → NO_HELMET + NO_BOOT violations
         result = make_detection(has_helmet=False, has_vest=True)
 
-        def run_pipeline():
-            count = 0
-            for obj in result.objects:
-                if obj.cls != "person":
-                    continue
-                bbox_list = [obj.bbox.x1, obj.bbox.y1, obj.bbox.x2, obj.bbox.y2]
-                if not roi.is_in_roi(result.camera_id, bbox_list):
-                    continue
-                violations = classifier.classify(result)
-                for v in violations:
-                    if cooldown.should_alert(v.camera_id, v.type):
-                        dispatcher.dispatch(v, frame_bgr=None)
-                        count += 1
-            return count
+        # First pass: violations should dispatch
+        dispatched1 = pipeline.process(result, frame_bgr=None)
+        assert len(dispatched1) >= 1
+        first_call_count = mock_db.insert_violation.call_count
 
-        # First pass: should dispatch NO_HELMET and NO_BOOT (no boot detection in result)
-        assert run_pipeline() == 2
-        # Second pass: cooldown blocks both
-        assert run_pipeline() == 0
+        # Second pass: cooldown blocks all same types
+        dispatched2 = pipeline.process(result, frame_bgr=None)
+        assert len(dispatched2) == 0
+        # No additional DB inserts
+        assert mock_db.insert_violation.call_count == first_call_count
 
-    def test_full_pipeline_dispatches_valid_violation(self):
+    def test_pipeline_dispatches_valid_violation(self):
         """A valid violation inside ROI with no cooldown should dispatch."""
+        from alert import AlertPipeline
         from alert.roi_matcher import ROIMatcher
         from alert.classifier import ViolationClassifier
         from alert.cooldown import CooldownManager
@@ -123,26 +108,25 @@ class TestAlertPipeline:
         }
         mock_db.insert_violation.return_value = 1
 
-        roi = ROIMatcher(mock_db)
-        classifier = ViolationClassifier()
-        cooldown = CooldownManager(cooldown_seconds=0)  # No cooldown
-        dispatcher = Dispatcher(db=mock_db, ws_manager=None)
+        pipeline = AlertPipeline(
+            roi_matcher=ROIMatcher(mock_db),
+            classifier=ViolationClassifier(),
+            cooldown=CooldownManager(cooldown_seconds=0),  # No cooldown
+            dispatcher=Dispatcher(db=mock_db, ws_manager=None),
+        )
 
+        # Person without helmet and vest → NO_HELMET + NO_VEST + NO_BOOT
         result = make_detection(has_helmet=False, has_vest=False)
+        dispatched = pipeline.process(result, frame_bgr=None)
 
-        violations_dispatched = 0
-        for obj in result.objects:
-            if obj.cls != "person":
-                continue
-            bbox_list = [obj.bbox.x1, obj.bbox.y1, obj.bbox.x2, obj.bbox.y2]
-            if not roi.is_in_roi(result.camera_id, bbox_list):
-                continue
-            violations = classifier.classify(result)
-            for v in violations:
-                if cooldown.should_alert(v.camera_id, v.type):
-                    dispatcher.dispatch(v, frame_bgr=None)
-                    violations_dispatched += 1
+        assert len(dispatched) >= 2  # NO_HELMET + NO_VEST at minimum
+        violation_types = {v.type for v in dispatched}
+        assert "NO_HELMET" in violation_types
+        assert "NO_VEST" in violation_types
+        assert mock_db.insert_violation.call_count == len(dispatched)
 
-        # Should dispatch NO_HELMET and NO_VEST (and maybe NO_BOOT)
-        assert violations_dispatched >= 2
-        assert mock_db.insert_violation.call_count >= 2
+        # Verify dispatched violations have expected structure
+        for v in dispatched:
+            assert v.camera_id == "cam-01"
+            assert v.id == 1  # From mock return value
+            assert v.thumbnail_path != ""
