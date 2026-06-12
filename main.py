@@ -134,9 +134,10 @@ async def main_async(config_path: str = "edge/config.yaml"):
     mm = ModelManager()
     try:
         mm.load()
-    except FileNotFoundError as e:
-        print(f"[Main] Warning: Model not found ({e}), continuing without detection")
+    except Exception as e:
+        print(f"[Main] Warning: Model not loaded ({e}), continuing without detection")
         # System still starts — dashboard and alerts work, just no detections
+        # Possible causes: missing model file, missing onnxruntime, missing OpenVINO
 
     detector = Detector(mm)
     scheduler = Scheduler()

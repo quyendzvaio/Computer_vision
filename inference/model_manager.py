@@ -87,7 +87,13 @@ class ModelManager:
         self._warmup()
 
     def _load_onnx(self):
-        import onnxruntime as ort
+        try:
+            import onnxruntime as ort
+        except ImportError:
+            raise RuntimeError(
+                "Neither OpenVINO nor ONNX Runtime is available. "
+                "Install onnxruntime: pip install onnxruntime"
+            )
         if not self.model_path.exists():
             raise FileNotFoundError(f"Model not found: {self.model_path}")
         self._session = ort.InferenceSession(
