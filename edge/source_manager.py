@@ -56,7 +56,11 @@ class SourceManager:
         cap = cv2.VideoCapture(src)
 
         if not cap.isOpened():
-            raise RuntimeError(f"Failed to open camera source: {cam.source}")
+            if str(src).isdigit():
+                hint = " (USB device /dev/video{} — check device exists and container has access)".format(src)
+            else:
+                hint = ""
+            raise RuntimeError(f"Failed to open camera source: {cam.source}{hint}")
 
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 

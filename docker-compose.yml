@@ -14,8 +14,16 @@ services:
       - ./data:/app/data
       - ./models:/app/models:ro
       - ./edge/config.yaml:/app/edge/config.yaml:ro
+    # USB webcam access — map all /dev/video* devices
+    # If you know your camera's exact device, use e.g. "/dev/video0:/dev/video0"
+    devices:
+      - "/dev/video0:/dev/video0"
+      - "/dev/video1:/dev/video1"
     environment:
       - PYTHONUNBUFFERED=1
+    # Grant access to video device nodes
+    group_add:
+      - "44"  # video group (typical on Linux)
     # Optional: uncomment if using Mosquitto
     # depends_on:
     #   - mqtt

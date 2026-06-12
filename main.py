@@ -83,7 +83,9 @@ def run_edge_agent(config, local_bridge, stop_event):
             agent.start_mqtt()
 
         agent.start_all_cameras()
-        print(f"[Main] Edge agent started with {len(agent.source_manager.cameras)} cameras")
+        running_count = sum(1 for cid in agent.source_manager.cameras
+                            if agent.source_manager.is_running(cid))
+        print(f"[Main] Edge agent ready: {running_count}/{len(agent.source_manager.cameras)} cameras running")
 
         # Keep alive
         while not stop_event.is_set():
@@ -91,7 +93,11 @@ def run_edge_agent(config, local_bridge, stop_event):
 
         agent.stop()
     except Exception as e:
-        print(f"[Main] Edge agent error: {e}")
+        print(f"[Main] Edge agent fatal error: {e}")
+        import traceback
+        traceback.print_exc()
+        # Signal the main loop to stop since we have no cameras
+        stop_event.set()
 
 
 async def main_async(config_path: str = "edge/config.yaml"):

@@ -33,13 +33,21 @@ class EdgeAgent:
         self.mqtt.set_active_cameras(list(self.source_manager.cameras.keys()))
 
     def start_all_cameras(self):
-        """Start capturing from all configured cameras."""
+        """Start capturing from all configured cameras.
+        Per-camera failures are logged but don't stop other cameras."""
+        started = 0
+        failed = 0
         for cam_id, cam in self.source_manager.cameras.items():
             is_local = cam.source.isdigit()
-            if is_local and self.local_bridge:
-                self.source_manager.start(cam_id, self._local_frame_handler)
-            else:
-                self.source_manager.start(cam_id, self._mqtt_frame_handler)
+            handler = self._local_frame_handler if (is_local and self.local_bridge) else self._mqtt_frame_handler
+            try:
+                self.source_manager.start(cam_id, handler)
+                started += 1
+                print(f"[EdgeAgent] Camera {cam_id} started (local={is_local})")
+            except Exception as e:
+                failed += 1
+                print(f"[EdgeAgent] Camera {cam_id} FAILED: {e}")
+        print(f"[EdgeAgent] {started} started, {failed} failed, {len(self.source_manager.cameras)} total")
 
     def _local_frame_handler(self, camera_id: str, frame: np.ndarray):
         """Handle frame from local (USB) camera: push to LocalBridge queue."""
