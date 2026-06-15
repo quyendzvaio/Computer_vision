@@ -1,6 +1,17 @@
-# CV Safety Monitor
+# CV Safety Monitor v2
 
-Realtime computer vision system for construction site safety monitoring. Detects violations (fall, no-helmet, no-vest, no-boot) within user-defined ROI zones across multiple cameras.
+Realtime computer vision system for construction site safety monitoring. **v2** redesigned for minimum latency: PyQt5 + QThread + ZeroMQ architecture (replaces multi-process + Web Dashboard).
+
+**Two independent camera pipelines:**
+- **CAM1:** Person detection inside drawn ROI zones (3-4 zones per camera)
+- **CAM2:** PPE detection (helmet/vest/boot) via YOLOv8n + MobileNetV3 classifiers
+
+**Architecture:** Edge device captures USB cameras → ZeroMQ PUB raw BGR → GPU machine (single PyQt5 process, 3 threads: CAM1/CAM2/Main+Web).
+
+---
+## v1 (Legacy)
+
+Old multi-process architecture preserved in `inference/`, `alert/`, `dashboard/` directories.
 
 ## Architecture
 
