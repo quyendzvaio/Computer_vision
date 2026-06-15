@@ -45,8 +45,8 @@ class BBox:
 
 
 # Type aliases for violation classification
-ViolationType = Literal["FALL", "NO_HELMET", "NO_VEST", "NO_BOOT"]
-SeverityLevel = Literal["HIGH", "MEDIUM"]
+ViolationType = Literal["PERSON_IN_ZONE", "NO_HELMET", "NO_VEST", "NO_BOOT"]
+SeverityLevel = Literal["HIGH", "MEDIUM", "LOW"]
 
 
 @dataclass
@@ -72,6 +72,11 @@ class DetectionResult:
     objects: List[DetectedObject] = field(default_factory=list)
     keypoints: Optional[List[List[Keypoint]]] = None  # per-person keypoints (17 each)
     timestamp: datetime = field(default_factory=datetime.now)
+
+    @property
+    def person_count(self) -> int:
+        """Number of detected persons in this frame."""
+        return sum(1 for o in self.objects if o.cls == "person")
 
 
 @dataclass
