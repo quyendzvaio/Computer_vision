@@ -1,0 +1,15 @@
+services:
+  cv-edge:
+    build:
+      context: .
+      dockerfile: Dockerfile.edge
+    image: cv-edge:latest
+    container_name: cv-edge
+    restart: unless-stopped
+    devices:
+      - "/dev/video0:/dev/video0"
+      - "/dev/video1:/dev/video1"
+    volumes:
+      - ./edge/config.yaml:/app/edge/config.yaml:ro
+    group_add:
+      - "44"  # video group

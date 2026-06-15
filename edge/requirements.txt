@@ -1,5 +1,5 @@
 # Edge device requirements for CV Safety Monitor v2
-opencv-python>=4.8.0
+opencv-python-headless>=4.8.0
 numpy>=1.24.0
 pyzmq>=25.0.0
 pyyaml>=6.0

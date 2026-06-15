@@ -1,0 +1,24 @@
+services:
+  cv-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    image: cv-gpu:latest
+    container_name: cv-gpu
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./gpu/models:/app/gpu/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - QT_QPA_PLATFORM=offscreen
+      - NVIDIA_VISIBLE_DEVICES=all
+    shm_size: 256m

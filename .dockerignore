@@ -8,6 +8,14 @@ __pycache__
 docs/
 tests/
 data/
-models/
 .env
 *.log
+.superpowers/
+.codegraph/
+.claude/
+edge/capture_loop.py
+inference/
+alert/
+dashboard/
+shared/memory.py
+models/*.onnx
