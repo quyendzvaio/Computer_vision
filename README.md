@@ -1,125 +1,118 @@
 # CV Safety Monitor v2
 
-Realtime computer vision system for construction site safety monitoring. **v2** redesigned for minimum latency: PyQt5 + QThread + ZeroMQ architecture (replaces multi-process + Web Dashboard).
-
-**Two independent camera pipelines:**
-- **CAM1:** Person detection inside drawn ROI zones (3-4 zones per camera)
-- **CAM2:** PPE detection (helmet/vest/boot) via YOLOv8n + MobileNetV3 classifiers
-
-**Architecture:** Edge device captures USB cameras → ZeroMQ PUB raw BGR → GPU machine (single PyQt5 process, 3 threads: CAM1/CAM2/Main+Web).
-
----
-## v1 (Legacy)
-
-Old multi-process architecture preserved in `inference/`, `alert/`, `dashboard/` directories.
+AI camera safety monitor. Detects zone intrusion + PPE violations (helmet/vest/boot) in realtime.
 
 ## Architecture
 
 ```
-Webcam/RTSP → Edge Agent → MQTT/Queue → Inference Engine (OpenVINO YOLOv8)
-                                           ↓
-                                      DetectionResult
-                                           ↓
-                                      Alert Pipeline
-                                      (ROI → Classify → Cooldown → Dispatch)
-                                           ↓
-                                   Dashboard (WebSocket)
+┌── Windows Edge (NATIVE) ────┐      ┌── Ubuntu GPU Server (DOCKER) ─┐
+│                              │      │                               │
+│  edge/sender.py              │      │  Container: cv-server          │
+│  ┌──────────┐  ┌─────────┐  │      │  ┌──────────┐  ┌───────────┐  │
+│  │ USB Cam1 │→│ ZMQ PUB │──┼──TCP──┼─→│ZMQ SUB   │→│ YOLOv8    │  │
+│  │ USB Cam2 │→│ ZMQ PUB │──┼──TCP──┼─→│ cam thread│  │ detect    │  │
+│  └──────────┘  └─────────┘  │ :5555 │  └──────────┘  ├───────────┤  │
+│                              │ :5556 │              │ ROI check │  │
+│  Dependencies: opencv, pyzmq │      │              ├───────────┤  │
+│  No Docker (USB passthrough  │      │              │ WebServer │  │
+│  impossible on Windows)       │      │              │ :8080     │  │
+└──────────────────────────────┘      │              └───────────┘  │
+                                       │                             │
+                                       │  Dependencies: ONNX, PyQt5  │
+                                       │  (offscreen), FastAPI        │
+                                       └─────────────────────────────┘
 ```
 
-## Quick Start
+| Component | Platform | Chạy bằng |
+|---|---|---|
+| Edge sender | Windows | `python edge/sender.py` (native) |
+| GPU server | Ubuntu | `docker compose -f docker-compose.gpu.yml up` |
+| Dashboard | Browser | http://server-ip:8080 |
 
-### 1. Prerequisites
+## Setup
 
-- Python 3.10+
-- Intel CPU (for OpenVINO) or any CPU (ONNX Runtime fallback)
-- Mosquitto MQTT broker (optional, for remote cameras)
-
-### 2. Install
+### 1. GPU Server (Ubuntu + Docker)
 
 ```bash
-pip install -r requirements.txt
+# Clone
+git clone <repo> && cd CV
+
+# Download model
+mkdir -p gpu/models
+wget -O gpu/models/yolov8n.onnx \
+  https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n.onnx
+
+# Build & run
+docker compose -f docker-compose.gpu.yml up -d
 ```
 
-### 3. Download Models
-
+**Check logs:**
 ```bash
-mkdir -p models
-cd models
-# YOLOv8n detection model
-wget https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n.onnx
-# YOLOv8n-pose model (optional, for fall detection)
-wget https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n-pose.onnx
-cd ..
+docker logs -f cv-server
 ```
 
-### 4. Configure Cameras
+Mở firewall:
+```bash
+sudo ufw allow 5555/tcp
+sudo ufw allow 5556/tcp
+sudo ufw allow 8080/tcp
+```
 
-Edit `edge/config.yaml`:
+### 2. Windows Edge (Native)
+
+```powershell
+# Python 3.10+ required
+python -m venv venv
+.\venv\Scripts\activate
+
+pip install -r edge\requirements.txt
+
+# Edit config — set server IP
+notepad edge\config.yaml
+# → gpu_host: <SERVER_IP>
+# → device_path: 0 (USB index)
+
+# Run
+python edge\sender.py
+```
+
+### 3. Open Dashboard
+
+Browser → http://server-ip:8080
+
+## Config
+
+`edge/config.yaml`:
+
 ```yaml
-mqtt:
-  broker: localhost
-  port: 1883
+gpu_host: 192.168.1.100   # GPU server IP
 
 cameras:
-  - id: cam-01
-    source: 0          # USB webcam index
-    roi: [[100, 50], [500, 50], [500, 400], [100, 400]]
-  - id: cam-02
-    source: rtsp://192.168.1.100:554/stream1
+  - id: cam1
+    device_path: 0         # USB index (Windows) / /dev/video0 (Linux)
+    zmq_port: 5555         # must match docker-compose
+    fps: 15
+    resolution: [640, 480]
 ```
 
-### 5. Run
-
-```bash
-python main.py
-```
-
-Open http://localhost:8080 for the dashboard.
-Open http://localhost:8080/admin.html for the ROI drawing tool.
-Open http://localhost:8080/history.html for violation history.
-API docs: http://localhost:8080/docs
-
-## Project Structure
+## Project Layout
 
 ```
 CV/
-├── edge/              # Frame capture, processing, MQTT publish
-├── inference/         # OpenVINO model loading, detection, scheduling
-├── alert/             # ROI matching, violation classification, cooldown, dispatch
-├── dashboard/         # FastAPI server, WebSocket, HTML/JS/CSS frontend
-├── shared/            # Shared data models (DetectionResult, Violation, etc.)
-├── tests/             # Unit and integration tests
-├── models/            # Downloaded ONNX/IR model files
-├── data/              # SQLite DB and thumbnail storage (runtime)
-└── main.py            # Entry point
+├── edge/               # Edge device: capture + ZMQ send
+│   ├── sender.py       # Windows: OpenCV → ZMQ PUB loop
+│   ├── config.yaml     # Camera config + server IP
+│   └── requirements.txt
+├── gpu/                # GPU server: ZMQ SUB → detect → web
+│   ├── main.py         # Entry: PyQt5 app + cam threads
+│   ├── cam1_thread.py  # CAM1: person in zone
+│   ├── cam2_thread.py  # CAM2: PPE classification
+│   ├── detector.py     # YOLOv8n ONNX
+│   ├── web_server.py   # FastAPI + WebSocket
+│   └── models/         # YOLO ONNX files (gitignored)
+├── shared/             # Data models
+├── Dockerfile.gpu      # Server container
+├── Dockerfile.edge     # Linux edge container (ko dùng cho Windows)
+├── docker-compose.gpu.yml
+└── requirements.txt    # Server deps
 ```
-
-## API Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/cameras` | List configured cameras |
-| GET | `/api/roi/{camera_id}` | Get ROI polygon |
-| PUT | `/api/roi/{camera_id}` | Save ROI polygon |
-| GET | `/api/violations` | Query violation history |
-| GET | `/api/violations/{id}/thumbnail` | Get violation thumbnail |
-| WS | `/ws/dashboard` | Realtime alert + preview stream |
-
-## Violation Types
-
-| Type | Severity | Detection Method |
-|------|----------|-----------------|
-| FALL | HIGH | Pose estimation (aspect ratio + keypoint geometry) |
-| NO_HELMET | HIGH | Person without overlapping helmet detection |
-| NO_VEST | MEDIUM | Person without overlapping vest detection |
-| NO_BOOT | MEDIUM | Person without boot detection in lower third |
-
-## Running Tests
-
-```bash
-pytest tests/ -v
-```
-
-## License
-
-MIT

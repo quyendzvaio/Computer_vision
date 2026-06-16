@@ -1,0 +1,82 @@
+<h2>Vai trò từng công nghệ trong dự án</h2>
+<p class="subtitle">Tại sao cần PyQt5, QThread, MediaMTX — và tại sao từng cái phù hợp</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; line-height: 1.8;">
+
+      <div style="background: #1a1a2e; border-left: 4px solid #4fc3f7; padding: 12px; margin-bottom: 16px;">
+        <h3 style="margin:0 0 4px 0; color:#4fc3f7;">1. PyQt5 — GUI Framework</h3>
+        <p style="margin:0; color:#ccc; font-size: 13px;">
+          <b>Thay thế:</b> FastAPI Web Dashboard (hiện tại)<br>
+          <b>Vai trò:</b> Tạo cửa sổ desktop native để hiển thị video real-time + overlay detection + ROI drawing + alert popup<br>
+          <b>Tại sao chọn:</b> Qt là thư viện GUI mạnh nhất Python. Có QPainter/QGraphicsView để vẽ overlay siêu nhanh trực tiếp lên frame, không cần encode/decode base64 như WebSocket. Vẽ ROI polygon kéo thả mượt.
+        </p>
+      </div>
+
+      <div style="background: #1a1a2e; border-left: 4px solid #81c784; padding: 12px; margin-bottom: 16px;">
+        <h3 style="margin:0 0 4px 0; color:#81c784;">2. QThread — Đa luồng native</h3>
+        <p style="margin:0; color:#ccc; font-size: 13px;">
+          <b>Thay thế:</b> multiprocessing.Process + SharedMemory IPC (hiện tại)<br>
+          <b>Vai trò:</b> Mỗi camera chạy trong 1 QThread riêng: capture → inference → draw → relay, tất cả trong cùng tiến trình<br>
+          <b>Tại sao chọn:</b> QThread giao tiếp với main thread qua signal/slot, không cần shared memory, không cần pickle, không cần multiprocessing sync. Dữ liệu frame là con trỏ trong cùng address space → <b>zero-copy</b>. Giảm latency đáng kể so với IPC.
+        </p>
+      </div>
+
+      <div style="background: #1a1a2e; border-left: 4px solid #ffb74d; padding: 12px; margin-bottom: 16px;">
+        <h3 style="margin:0 0 4px 0; color:#ffb74d;">3. MediaMTX — RTSP Relay Server</h3>
+        <p style="margin:0; color:#ccc; font-size: 13px;">
+          <b>Thay thế:</b> WebSocket broadcast preview (hiện tại)<br>
+          <b>Vai trò:</b> Nhận frame từ PyQt → publish thành RTSP stream → các client khác (VLC, Dashboard Web, mobile app) có thể xem<br>
+          <b>Tại sao chọn:</b> MediaMTX là RTSP server siêu nhẹ (Go, single binary). Cho phép nhiều client subscribe 1 stream mà không ảnh hưởng đến latency của pipeline chính. Tách biệt viewing khỏi processing — processing chạy real-time trong QThread, MediaMTX chỉ relay.
+        </p>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>So sánh architecture cũ → mới</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+    <div class="mockup">
+      <div class="mockup-header" style="background: #c62828;">Hiện tại (multi-process + WS)</div>
+      <div class="mockup-body" style="font-size: 11px; padding: 12px;">
+        <div style="margin-bottom:8px;"><b>Luồng frame:</b></div>
+        <div>Capture (P1 thread)</div>
+        <div>→ write SharedMemory → P2 đọc</div>
+        <div>→ inference → write result SharedMemory</div>
+        <div>→ P1 đọc → overlay → base64 encode</div>
+        <div>→ WebSocket → browser render</div>
+        <div style="color:#f44336; margin-top:8px;">⚠️ 3 lần copy frame</div>
+        <div style="color:#f44336;">⚠️ base64 encode/decode</div>
+        <div style="color:#f44336;">⚠️ Python GIL + multiprocessing overhead</div>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header" style="background: #2e7d32;">Mới (PyQt + QThread + MediaMTX)</div>
+      <div class="mockup-body" style="font-size: 11px; padding: 12px;">
+        <div style="margin-bottom:8px;"><b>Luồng frame:</b></div>
+        <div>QThread: capture → inference → overlay</div>
+        <div>→ emit signal → PyQt widget render<br>
+        <span style="color:#888;">(cùng process, cùng memory space)</span></div>
+        <div>├── Gửi copy frame → MediaMTX → RTSP</div>
+        <div>└── (nếu có alert) → SQLite + WebSocket</div>
+        <div style="color:#4caf50; margin-top:8px;">✅ 0 IPC, 0 base64</div>
+        <div style="color:#4caf50;">✅ Zero-copy trong pipeline</div>
+        <div style="color:#4caf50;">✅ Qt signal/slot thread-safe native</div>
+        <div style="color:#4caf50;">✅ Viewing tách biệt khỏi processing</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Optional: Giữ Dashboard Web?</h3>
+  <p>PyQt là primary UI. Dashboard Web có thể giữ lại như secondary view:</p>
+  <ul>
+    <li>PyQt render native → MediaMTX RTSP → Web dashboard đọc RTSP và hiển thị</li>
+    <li>WebSocket vẫn dùng để push alert text cho web</li>
+    <li>Không cần base64 frame trên WebSocket nữa → giảm tải đáng kể</li>
+  </ul>
+</div>

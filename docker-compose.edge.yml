@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.edge
-    image: cv-edge:latest
+    image: cv-safety-edge:latest
     container_name: cv-edge
     restart: unless-stopped
     devices:
@@ -13,3 +13,4 @@ services:
       - ./edge/config.yaml:/app/edge/config.yaml:ro
     group_add:
       - "44"  # video group
+    network_mode: host

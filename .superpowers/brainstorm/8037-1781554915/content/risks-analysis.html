@@ -1,0 +1,132 @@
+<h2>Phân tích khó khăn & điểm chưa tối ưu</h2>
+<p class="subtitle">Nhìn thẳng vào các vấn đề tiềm ẩn trước khi design chi tiết</p>
+
+<div class="section">
+  <h3>🔴 Vấn đề 1: GIL + QThread — Inference có thực sự chạy song song?</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-size: 13px; line-height: 1.7;">
+      <p><b>Hiểu nhầm phổ biến:</b> QThread trong Python vẫn bị <b>GIL (Global Interpreter Lock)</b> ràng buộc.</p>
+      <p>Nếu cả CAM1 (YOLOv8) và CAM2 (YOLO-Pose) đều chạy inference trong QThread riêng:</p>
+      <ul>
+        <li>ONNX Runtime giải phóng GIL khi chạy C++ kernel → inference thực sự song song</li>
+        <li>Nhưng <b>Python code xử lý (crop, keypoint analysis, overlay drawing) vẫn chạy tuần tự</b></li>
+        <li>Nếu dùng GPU và cả 2 model cùng chiếm VRAM → có thể OOM trên edge device</li>
+      </ul>
+      <div style="background: #1a1a2e; border: 1px solid #333; border-radius: 6px; padding: 10px; margin-top: 8px;">
+        <b>Giải pháp:</b> Cân nhắc CAM1 inference trong process riêng (giữ shared memory cũ) nếu CPU/GPU không đủ mạnh. Hoặc dùng GPU model nhỏ hơn (YOLOv8n vs YOLOv8s).
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>🔴 Vấn đề 2: 2-stage PPE (Pose → crop → classify) — Tiềm ẩn latency cao</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-size: 13px; line-height: 1.7;">
+      <p>Mỗi frame CAM2 phải chạy:</p>
+      <div style="background: #1a1a2e; border: 1px solid #333; border-radius: 6px; padding: 10px; font-family: monospace; font-size: 12px; margin: 8px 0;">
+YOLO-Pose (full frame) → N keypoint sets
+  → Với mỗi person:
+    → crop vùng đầu → classifier nhẹ → helmet?
+    → crop vùng thân → classifier nhẹ → vest?
+    → crop vùng chân → classifier nhẹ → boot?
+Hậu xử lý + overlay → gửi đi
+      </div>
+      <p><b>Vấn đề:</b></p>
+      <ul>
+        <li>YOLO-Pose chậm hơn YOLOv8 detect (~1.5-2x) do phải predict thêm keypoint head</li>
+        <li>3 classifier nhỏ cho 1 người, nếu có 5 người = 15 lần classify/frame</li>
+        <li>Keypoints noise → crop sai → classifier kết quả tệ</li>
+        <li><b>Tổng latency có thể 70-120ms/frame</b> trên CPU, chưa kể capture + overlay</li>
+      </ul>
+      <div style="background: #1a1a2e; border: 1px solid #333; border-radius: 6px; padding: 10px; margin-top: 8px;">
+        <b>Giải pháp:</b> Skip frame strategy — chỉ chạy classifier 1 lần mỗi N frame. Hoặc dùng model detection thường cho PPE (YOLOv8 multi-class: person/helmet/vest/boot) rẻ hơn. Hoặc dùng YOLO-Pose rồi chỉ classify khi keypoint confidence > threshold.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>🟡 Vấn đề 3: PyQt mất accessibility so với Web Dashboard</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-size: 13px; line-height: 1.7;">
+      <ul>
+        <li>PyQt là desktop app → chỉ xem được trên máy chạy code (hoặc qua VNC/X11 forwarding)</li>
+        <li>Không thể xem từ mobile, tablet, laptop khác trong mạng</li>
+        <li>Không có REST API cho bên thứ ba tích hợp</li>
+        <li>Không có history page, admin page sẵn (hiện tại dashboard web có)</li>
+      </ul>
+      <div style="background: #1a1a2e; border: 1px solid #333; border-radius: 6px; padding: 10px; margin-top: 8px;">
+        <b>Giải pháp:</b> Hybrid — PyQt cho real-time monitoring chính. Giữ FastAPI + Web dashboard nhẹ cho viewing/mobile, dùng MediaMTX RTSP để cấp video stream thay vì base64 WS. Giữ REST API cho history/admin.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>🟡 Vấn đề 4: MediaMTX quản lý lifecycle + encoding overhead</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-size: 13px; line-height: 1.7;">
+      <ul>
+        <li>MediaMTX là process riêng — PyQt phải khởi tạo, monitor, restart khi crash</li>
+        <li>Frame gửi vào MediaMTX cần encode H264/H265 → tiêu tốn CPU/GPU (có thể 5-10ms/frame)</li>
+        <li>Nếu mục tiêu là xem trên PyQt là chính, encode RTSP là <b>chi phí phụ không cần thiết</b></li>
+        <li>Thêm 1 failure point vào system</li>
+      </ul>
+      <div style="background: #1a1a2e; border: 1px solid #333; border-radius: 6px; padding: 10px; margin-top: 8px;">
+        <b>Giải pháp:</b> MediaMTX optional — bật khi cần xem từ xa. Mặc định chỉ render PyQt local. Hoặc dùng GStreamer pipeline nhúng thay vì process riêng.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>🟡 Vấn đề 5: Object tracking cho ROI exit detection</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-size: 13px; line-height: 1.7;">
+      <p>Simple centroid/IoU tracking có vấn đề:</p>
+      <ul>
+        <li>Khi 2 người đi ngang qua nhau → ID swap → false alert "left zone"</li>
+        <li>Khi occlusion (che khuất) → mất track → re-enter → miss alert</li>
+        <li>Foot point (đáy bbox) không chính xác nếu người đang ngồi/cúi</li>
+        <li>Cần tuning IoU threshold khá nhiều</li>
+      </ul>
+      <div style="background: #1a1a2e; border: 1px solid #333; border-radius: 6px; padding: 10px; margin-top: 8px;">
+        <b>Giải pháp:</b> Dùng <b>BYTETrack</b> hoặc <b>BoT-SORT</b> (tracker by detection) thay vì centroid/IoU thủ công. Hoặc dùng <b>DeepSORT</b> với appearance feature. Độ chính xác 65% là chấp nhận được nên tracking đơn giản có thể đủ.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>🟢 Vấn đề 6: Timing & frame pacing giữa 2 camera</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-size: 13px; line-height: 1.7;">
+      <p>Nếu CAM1 chạy YOLOv8 (~20ms/frame) và CAM2 chạy YOLO-Pose (~35ms/frame), nhưng cả 2 USB camera đều cho frame ở 30fps (33ms/frame):</p>
+      <ul>
+        <li>CAM1 kịp xử lý mọi frame, dư tài nguyên</li>
+        <li>CAM2 không kịp → phải drop frame → latency tăng</li>
+        <li>Nếu 2 QThread cùng đọc USB → USB bandwidth có thể không đủ</li>
+        <li>Xử lý occupancy (khi có nhiều người trong frame) làm latency không ổn định</li>
+      </ul>
+      <div style="background: #1a1a2e; border: 1px solid #333; border-radius: 6px; padding: 10px; margin-top: 8px;">
+        <b>Giải pháp:</b> Frame budget — mỗi thread có max processing time, nếu vượt quá thì skip frame tiếp theo. Dùng queue bounded size để tránh memory leak.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>📊 Tổng quan mức độ rủi ro</h3>
+  <div style="display: grid; grid-template-columns: 1fr; gap: 8px;">
+    <div style="background: #4a1a1a; border: 1px solid #f44336; border-radius: 6px; padding: 10px; font-size: 12px;">
+      <b>🔴 CAO:</b> GIL + 2 model cùng chạy → cần kiểm tra GPU/CPU tài nguyên trước
+    </div>
+    <div style="background: #4a3a1a; border: 1px solid #ffb74d; border-radius: 6px; padding: 10px; font-size: 12px;">
+      <b>🟡 TRUNG BÌNH:</b> 2-stage PPE latency, Object tracking complexity, PyQt accessibility
+    </div>
+    <div style="background: #1a3a1a; border: 1px solid #81c784; border-radius: 6px; padding: 10px; font-size: 12px;">
+      <b>🟢 THẤP:</b> MediaMTX integration, SQLite thread-safety, Frame pacing (giải pháp rõ ràng)
+    </div>
+  </div>
+</div>

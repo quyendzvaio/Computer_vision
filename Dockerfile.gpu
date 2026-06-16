@@ -1,29 +1,13 @@
-# ── GPU Machine Image ──────────────────────────────────────
-# PyQt5 + YOLOv8n + MobileNetV3 + FastAPI + ZeroMQ SUB.
-# CUDA 12.2 base. ~2.5GB final (CUDA ~1.8GB unavoidable).
-# Cold start ~68s.
-# ───────────────────────────────────────────────────────────
+# ── GPU Server ──────────────────────────────────────────
+# Receives ZMQ frames from Windows edge → YOLOv8 detect → Web dashboard.
+# PyQt5 offscreen (no display needed). CPU inference via ONNX Runtime.
+# Optional nvidia-container-toolkit for GPU acceleration.
+# ───────────────────────────────────────────────────────
 
-# ── Build Stage ──
-FROM nvidia/cuda:12.2.2-runtime-ubuntu22.04 AS builder
+FROM python:3.11-slim
 
-WORKDIR /app
+# OpenCV + PyQt5 offscreen system libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip python3-venv \
-    && rm -rf /var/lib/apt/lists/*
-
-# Headless OpenCV avoids libGL dependency
-COPY requirements-gpu.txt .
-RUN sed -i 's/opencv-python/opencv-python-headless/' requirements-gpu.txt && \
-    pip3 install --no-cache-dir -r requirements-gpu.txt
-
-
-# ── Runtime Stage ──
-FROM nvidia/cuda:12.2.2-runtime-ubuntu22.04 AS runtime
-
-# System libs: OpenCV + PyQt5 offscreen + Qt platform
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip \
     libglib2.0-0 libgomp1 \
     libxcb-xinerama0 libxcb-icccm4 libxcb-image0 \
     libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
@@ -31,36 +15,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxkbcommon-x11-0 libfontconfig1 libdbus-1-3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Python packages from builder
-COPY --from=builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
-
 WORKDIR /app
 
-# Application code
+# Python deps
+COPY requirements.txt .
+RUN sed -i 's/opencv-python/opencv-python-headless/' requirements.txt && \
+    pip install --no-cache-dir -r requirements.txt
+
+# PyQt5 (needed by gpu/ modules)
+RUN pip install --no-cache-dir PyQt5
+
+# Application
 COPY gpu/ gpu/
 COPY shared/ shared/
-COPY main.py .
-COPY scripts/ scripts/
-
-# Pre-warm: import heavy modules at build time (faster cold start)
-RUN python3 -c "\
-from gpu.detector import YOLODetector; \
-from gpu.classifier import PPEManager; \
-print('[Build] Imports OK'); \
-"
-
-# Model volume — mount at runtime
-VOLUME /app/gpu/models
+# for config parsing
+COPY edge/ edge/
 
 EXPOSE 8080
 
 ENV PYTHONUNBUFFERED=1 \
-    QT_QPA_PLATFORM=offscreen \
-    DISPLAY=:0
+    QT_QPA_PLATFORM=offscreen
 
-# Health check with longer start period (CUDA warm-up)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/')" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/')" || exit 1
 
-ENTRYPOINT ["python3", "main.py"]
+ENTRYPOINT ["python", "-m", "gpu.main"]

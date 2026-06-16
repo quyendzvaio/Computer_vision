@@ -4,7 +4,15 @@
 Delegates to GPU machine app (PyQt5 + QThread architecture).
 Edge device runs separately (edge/sender.py).
 """
+import asyncio
+import multiprocessing
+import signal
 import sys
+import threading
+
+
+def load_config(config_path: str) -> dict:
+    import yaml
     with open(config_path) as f:
         return yaml.safe_load(f)
 

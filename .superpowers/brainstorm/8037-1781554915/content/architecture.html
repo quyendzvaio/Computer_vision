@@ -1,0 +1,59 @@
+<h2>Kiến trúc đề xuất — CV Safety Monitor v2</h2>
+<p class="subtitle">Chia làm 2 pipeline độc lập, mỗi camera một bài toán riêng</p>
+
+<div class="section">
+  <h3>Tổng quan luồng dữ liệu</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 20px; font-family: monospace; line-height: 1.8; font-size: 14px;">
+      <div style="background: #1a1a2e; border: 1px solid #333; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+        <div style="color: #4fc3f7; font-weight: bold; margin-bottom: 8px;">📷 CAM1 — Phát hiện ra khỏi vùng ROI</div>
+        <div style="color: #aaa;">USB Cam1 → PyQt Capture (QThread) → YOLOv8 Detector → ROI Exit Check → MediaMTX RTSP → Dashboard/App</div>
+        <div style="color: #666; font-size: 12px; margin-top: 4px;">                                             ↕ SharedMemory</div>
+        <div style="color: #666; font-size: 12px;">                                             Alert Pipeline → SQLite</div>
+      </div>
+      <div style="background: #1a1a2e; border: 1px solid #333; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+        <div style="color: #81c784; font-weight: bold; margin-bottom: 8px;">📷 CAM2 — Phát hiện trang bị bảo hộ (PPE)</div>
+        <div style="color: #aaa;">USB Cam2 → PyQt Capture (QThread) → YOLO-Pose → Keypoint Analyzer → MediaMTX RTSP → Dashboard/App</div>
+        <div style="color: #666; font-size: 12px; margin-top: 4px;">                            │                ↓</div>
+        <div style="color: #666; font-size: 12px;">                            │         PPE Classifier (head/hands/feet)</div>
+        <div style="color: #666; font-size: 12px;">                            │         → Alert Pipeline → SQLite</div>
+      </div>
+      <div style="background: #1a1a2e; border: 1px solid #333; border-radius: 8px; padding: 16px;">
+        <div style="color: #ffb74d; font-weight: bold; margin-bottom: 8px;">🖥️  PyQt5 Desktop App (Main Process)</div>
+        <div style="color: #aaa;">├─ QThread: Capture + Inference (CAM1)</div>
+        <div style="color: #aaa;">├─ QThread: Capture + Inference (CAM2)</div>
+        <div style="color: #aaa;">├─ MediaMTX Embedded: RTSP relay cho cả 2 cam</div>
+        <div style="color: #aaa;">├─ Real-time overlay + alert popup</div>
+        <div style="color: #aaa;">└─ WebSocket bridge → Dashboard Web (optional)</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>So sánh kiến trúc cũ vs mới</h3>
+  <div class="split">
+    <div class="mockup" style="flex:1;">
+      <div class="mockup-header" style="background: #c62828;">Hiện tại (Multi-process)</div>
+      <div class="mockup-body" style="font-size: 12px; padding: 12px;">
+        <div>P1 (thread): capture_frame → overlay → WS</div>
+        <div>P2 (process): inference → SharedMemory</div>
+        <div>Async: dashboard server</div>
+        <div style="color:#888; margin-top:8px;">❌ Shared memory IPC overhead</div>
+        <div style="color:#888;">❌ Process sync complexity</div>
+        <div style="color:#888;">❌ 1 pipeline cho mọi camera</div>
+      </div>
+    </div>
+    <div class="mockup" style="flex:1;">
+      <div class="mockup-header" style="background: #2e7d32;">Mới (PyQt5 + QThread)</div>
+      <div class="mockup-body" style="font-size: 12px; padding: 12px;">
+        <div>QThread 1: CAM1 capture + inference + ROI</div>
+        <div>QThread 2: CAM2 capture + inference + PPE</div>
+        <div>Main thread: PyQt UI + MediaMTX relay</div>
+        <div style="color:#888; margin-top:8px;">✅ No IPC — shared memory in-process</div>
+        <div style="color:#888;">✅ Pipeline độc lập, không blocking</div>
+        <div style="color:#888;">✅ Real-time UI overlay native</div>
+      </div>
+    </div>
+  </div>
+</div>

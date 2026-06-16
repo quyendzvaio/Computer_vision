@@ -1,0 +1,114 @@
+<h2>3 Approaches — Kiến trúc GPU Machine</h2>
+<p class="subtitle">YOLOv8n multi-class, ZeroMQ transport, Hybrid PyQt + FastAPI</p>
+
+<div class="section">
+  <h3>Approach A: 2 QThreads độc lập ⭐ <span style="color:#81c784;">(Khuyên dùng)</span></h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-family: monospace; font-size: 13px; line-height: 1.7;">
+<div style="background:#1a1a2e; border:1px solid #333; border-radius:6px; padding:12px;">
+GPU Machine — Process duy nhất:
+
+Main Thread (PyQt UI + FastAPI)
+├── QThread CAM1:
+│     ZMQ SUB cam1 → YOLOv8n(inst1) → ROI check → overlay → emit frame
+├── QThread CAM2:
+│     ZMQ SUB cam2 → YOLOv8n(inst2) → PPE check → overlay → emit frame
+└── FastAPI web (async, optional): đọc frame từ shared queue → serve
+</div>
+      <div style="margin-top:8px;">
+        <div style="color:#81c784; font-weight:bold;">✅ Ưu điểm:</div>
+        <ul>
+          <li>Đơn giản nhất — 1 process, 3 threads, dễ hiểu, dễ debug</li>
+          <li>2 pipeline hoàn toàn độc lập — CAM1 skip frame không ảnh hưởng CAM2</li>
+          <li>Mỗi QThread self-paced — frame budget per thread</li>
+          <li>ZeroMQ auto-reconnect khi edge mất kết nối</li>
+        </ul>
+        <div style="color:#ffb74d; font-weight:bold; margin-top:4px;">⚠️ Nhược điểm:</div>
+        <ul>
+          <li>2 instance YOLOv8n → ~12MB VRAM (không đáng kể với GPU)</li>
+          <li>GIL vẫn ảnh hưởng Python code hậu xử lý</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Approach B: Pipeline Queue + Shared Model</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-family: monospace; font-size: 13px; line-height: 1.7;">
+<div style="background:#1a1a2e; border:1px solid #333; border-radius:6px; padding:12px;">
+GPU Machine:
+
+Main Thread (UI)
+├── QThread CAM1_Recv: ZMQ → frame_queue
+├── QThread CAM2_Recv: ZMQ → frame_queue
+├── InferencePool (2 workers, shared model):
+│     frame_queue → inference → result_queue
+└── Main: result_queue → overlay → render + FastAPI
+</div>
+      <div style="margin-top:8px;">
+        <div style="color:#81c784; font-weight:bold;">✅ Ưu điểm:</div>
+        <ul>
+          <li>1 model instance, ít VRAM hơn</li>
+          <li>Có thể điều tiết frame rate qua queue size</li>
+        </ul>
+        <div style="color:#f44336; font-weight:bold; margin-top:4px;">❌ Nhược điểm:</div>
+        <ul>
+          <li>Queue synchronization phức tạp, dễ deadlock</li>
+          <li>CAM1 latency cao → CAM2 bị ảnh hưởng (shared pool)</li>
+          <li>Khó debug hơn nhiều</li>
+          <li>Với YOLOv8n 6MB, 2 instance không đáng để đánh đổi</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Approach C: 2 Processes (Inference + UI riêng)</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-family: monospace; font-size: 13px; line-height: 1.7;">
+<div style="background:#1a1a2e; border:1px solid #333; border-radius:6px; padding:12px;">
+GPU Machine:
+
+Process 1 (Inference):
+├── ZMQ SUB cam1 → YOLOv8n → kết quả → ZMQ PUB result
+└── ZMQ SUB cam2 → YOLOv8n → kết quả → ZMQ PUB result
+
+Process 2 (PyQt UI + FastAPI):
+├── ZMQ SUB result → overlay → render
+└── FastAPI web
+</div>
+      <div style="margin-top:8px;">
+        <div style="color:#81c784; font-weight:bold;">✅ Ưu điểm:</div>
+        <ul>
+          <li>Tách biệt UI và inference — restart UI không mất inference</li>
+          <li>Không bị GIL (inference process CPU-bound)</li>
+        </ul>
+        <div style="color:#f44336; font-weight:bold; margin-top:4px;">❌ Nhược điểm:</div>
+        <ul>
+          <li>Giống architecture cũ (multiprocessing) — lại có IPC</li>
+          <li>ZMQ IPC overhead (copy frame lần 2)</li>
+          <li>Phức tạp không cần thiết cho project này</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Khuyến nghị: Approach A</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-size: 13px;">
+      <p><b>Lý do:</b> Với YOLOv8n (6MB ONNX, ~20ms/frame trên GPU), 2 instance chỉ tốn ~12MB VRAM — không đáng kể. Lợi ích của sự đơn giản và độc lập lớn hơn nhiều so với tiết kiệm model instance.</p>
+      <p><b>Cụ thể:</b></p>
+      <ul>
+        <li>GPU hiện tại: giả sử 4GB+ VRAM → 12MB là ~0.3% VRAM</li>
+        <li>Mỗi QThread có frame budget riêng (skip khi quá tải)</li>
+        <li>Không cần queue, không cần lock, không cần IPC</li>
+        <li>Signal/slot an toàn từ QThread → main thread để render</li>
+      </ul>
+    </div>
+  </div>
+</div>

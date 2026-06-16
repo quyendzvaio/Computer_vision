@@ -1,0 +1,88 @@
+<h2>Person INSIDE ROI vs Person LEAVE ROI — Cái nào dễ hơn?</h2>
+<p class="subtitle">Phân tích độ phức tạp, latency và độ tin cậy</p>
+
+<div class="section">
+  <h3>So sánh trực tiếp</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+    <div class="mockup">
+      <div class="mockup-header" style="background: #2e7d32;">✅ INSIDE ROI — Dễ</div>
+      <div class="mockup-body" style="font-size: 12px; padding: 12px; line-height: 1.7;">
+        <div>Mỗi frame:</div>
+        <div style="font-family: monospace; background:#1a1a2e; padding:8px; border-radius:4px; margin:8px 0;">
+detect → foot point → point_in_poly?
+        </div>
+        <ul>
+          <li><b>1 frame là đủ</b> — không cần tracking</li>
+          <li><b>Không có state</b> — stateless, dễ debug</li>
+          <li><b>Không có ID swap</b> — không tracker, không false positive từ ID</li>
+          <li><b>Latency thấp nhất</b> — chỉ check geometry</li>
+          <li><b>Mất mát:</b> skip frame không ảnh hưởng</li>
+        </ul>
+        <div style="color: #81c784; margin-top: 8px;">Phù hợp: ROI = vùng cấm → xuất hiện trong vùng cấm là vi phạm</div>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header" style="background: #c62828;">❌ LEAVE ROI — Khó</div>
+      <div class="mockup-body" style="font-size: 12px; padding: 12px; line-height: 1.7;">
+        <div>Mỗi frame:</div>
+        <div style="font-family: monospace; background:#1a1a2e; padding:8px; border-radius:4px; margin:8px 0;">
+detect → track → check transition inside→outside
+        </div>
+        <ul>
+          <li><b>Cần 2+ frame</b> — phải so sánh frame trước-sau</li>
+          <li><b>Có state tracking</b> — ID, vị trí, trạng thái</li>
+          <li><b>ID swap = false alarm</b> — 2 người đi qua nhau tưởng "rời zone"</li>
+          <li><b>Skip frame = mất transition</b> — nếu skip đúng lúc người rời zone</li>
+          <li><b>Occlusion = mất track</b> → treo state vĩnh viễn</li>
+        </ul>
+        <div style="color: #f44336; margin-top: 8px;">Phù hợp: ROI = vùng an toàn → rời khỏi vùng an toàn là vi phạm</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Tại sao INSIDE ROI dễ hơn nhiều?</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-size: 13px; line-height: 1.7;">
+      <p>Với accuracy target 65% và latency là ưu tiên:</p>
+      <ul>
+        <li><b>INSIDE ROI:</b> Chỉ cần detect person đúng ~65% frame. Skip frame 50% vẫn OK. Nếu frame này detect được person trong ROI → alert. Nếu frame sau skip → không sao, alert đã được gửi từ frame trước.</li>
+        <li><b>LEAVE ROI:</b> Cần tracking ổn định qua nhiều frame. Skip frame có thể mất transition. Nếu accuracy 65% → tracking càng tệ hơn (lỗi chồng lỗi). False positive rate sẽ cao hơn nhiều.</li>
+      </ul>
+      <p style="margin-top: 8px;"><b>Kết luận:</b> INSIDE ROI đơn giản hơn, latency thấp hơn, ít false positive hơn. LEAVE ROI chỉ nên chọn nếu use case bắt buộc phải detect "rời khỏi vùng an toàn".</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>🚩 Vấn đề kiến trúc: Edge device + Máy GPU</h3>
+  <p class="subtitle">Đây là điểm chưa hợp lý nhất trong thiết kế hiện tại</p>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-size: 13px; line-height: 1.7;">
+      <p>Bạn nói có 1 edge device (gắn camera) và 1 máy GPU (chạy inference). Kiến trúc PyQt + QThread đề xuất ở trên <b>chỉ đúng khi mọi thứ chạy trên cùng 1 máy</b>.</p>
+      <p>Với 2 máy riêng, có 2 hướng:</p>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;">
+        <div style="background: #1a1a2e; border: 1px solid #333; border-radius: 6px; padding: 10px;">
+          <div style="color: #81c784; font-weight: bold;">Hướng A: Edge capture, GPU inference</div>
+          <div style="font-size: 11px; line-height: 1.6; margin-top: 6px;">
+            <div>Edge: PyQt capture → gửi frame qua mạng</div>
+            <div>GPU: nhận → inference → ROI/PPE → kết quả</div>
+            <div>Network latency: 1-5ms (LAN)</div>
+            <div style="color:#888;">✅ GPU tận dụng tối đa</div>
+            <div style="color:#888;">❌ Phải có network protocol</div>
+          </div>
+        </div>
+        <div style="background: #1a1a2e; border: 1px solid #333; border-radius: 6px; padding: 10px;">
+          <div style="color: #ffb74d; font-weight: bold;">Hướng B: GPU machine chạy tất cả</div>
+          <div style="font-size: 11px; line-height: 1.6; margin-top: 6px;">
+            <div>Edge: chỉ relay USB camera → GPU machine qua USB-over-IP hoặc RTSP</div>
+            <div>GPU: PyQt + QThread + inference + UI</div>
+            <div style="color:#888;">✅ Kiến trúc đơn giản nhất</div>
+            <div style="color:#888;">❌ USB-over-IP có thể không ổn định</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

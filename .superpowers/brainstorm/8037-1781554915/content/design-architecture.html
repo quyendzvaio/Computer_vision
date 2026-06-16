@@ -1,0 +1,157 @@
+<h2>Design — Tổng quan kiến trúc</h2>
+<p class="subtitle">Approach A: 2 QThreads độc lập, PyQt + FastAPI hybrid</p>
+
+<div class="section">
+  <h3>Tổng quan</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 20px; font-family: monospace; font-size: 14px; line-height: 1.8;">
+
+<div style="background: #1a1a2e; border: 1px solid #4fc3f7; border-radius: 8px; padding: 16px; margin-bottom: 16px; text-align:center;">
+  <b style="color:#4fc3f7;">EDGE DEVICE</b><br>
+  <span style="color:#aaa;">USB Cam1 + Cam2 → ZMQ PUB (JPEG)</span>
+</div>
+
+<div style="display:flex; justify-content:center; margin:8px 0;">
+  <div style="color:#666;">▲ LAN (ZeroMQ TCP) ▼</div>
+</div>
+
+<div style="background: #1a1a2e; border: 1px solid #ffb74d; border-radius: 8px; padding: 16px;">
+  <b style="color:#ffb74d; display:block; text-align:center; margin-bottom:12px;">GPU MACHINE — 1 PROCESS, 3 THREADS</b>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; font-size:12px;">
+    <div style="background:#16213e; border-radius:6px; padding:10px;">
+      <b style="color:#4fc3f7;">QThread CAM1</b>
+      <div style="color:#aaa; margin-top:4px;">
+        ZMQ SUB cam1<br>
+        → YOLOv8n detect<br>
+        → ROI inside check<br>
+        → overlay → emit signal
+      </div>
+    </div>
+    <div style="background:#16213e; border-radius:6px; padding:10px;">
+      <b style="color:#81c784;">QThread CAM2</b>
+      <div style="color:#aaa; margin-top:4px;">
+        ZMQ SUB cam2<br>
+        → YOLOv8n detect<br>
+        → PPE classify (bbox)<br>
+        → overlay → emit signal
+      </div>
+    </div>
+    <div style="background:#16213e; border-radius:6px; padding:10px;">
+      <b style="color:#ffb74d;">Main Thread</b>
+      <div style="color:#aaa; margin-top:4px;">
+        PyQt QWidget render<br>
+        ROI drawing (mouse)<br>
+        Alert popup<br>
+        FastAPI web (async)
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:12px; border-top:1px solid #333; padding-top:12px; font-size:12px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+    <div style="background:#16213e; border-radius:6px; padding:8px;">
+      <b style="color:#ff8a65;">SQLite</b>
+      <div style="color:#aaa;">Violations, ROI configs, camera config</div>
+    </div>
+    <div style="background:#16213e; border-radius:6px; padding:8px;">
+      <b style="color:#ce93d8;">FastAPI Web</b>
+      <div style="color:#aaa;">History view, admin, REST API (WS for alerts)</div>
+    </div>
+  </div>
+</div>
+
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Edge Device — Capture & Send</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-size: 12px;">
+<script>
+// pseudo-code, không phải code thật
+</script>
+<pre style="background:#1a1a2e; padding:10px; border-radius:6px; color:#ccc; font-size:11px; line-height:1.5;">
+Edge device:
+  Script Python đơn giản (ko cần PyQt/PySide)
+
+  main():
+    cap1 = cv2.VideoCapture(0)   # USB Cam1
+    cap2 = cv2.VideoCapture(2)   # USB Cam2
+    ctx = zmq.Context()
+    pub1 = ctx.socket(zmq.PUB)   # port 5555
+    pub2 = ctx.socket(zmq.PUB)   # port 5556
+
+    while True:
+      ret1, frame1 = cap1.read()
+      if ret1: pub1.send(jpeg_encode(frame1))
+
+      ret2, frame2 = cap2.read()
+      if ret2: pub2.send(jpeg_encode(frame2))
+
+      # skip frame nếu camera không kịp
+      time.sleep(0.01)  # ~100fps cap
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>GPU Machine — Component map</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-size: 13px;">
+      <table style="width:100%; border-collapse: collapse;">
+        <tr style="border-bottom:1px solid #333;">
+          <th style="text-align:left; padding:6px; color:#4fc3f7;">Component</th>
+          <th style="text-align:left; padding:6px; color:#4fc3f7;">Thread</th>
+          <th style="text-align:left; padding:6px; color:#4fc3f7;">Chức năng</th>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:6px;">FrameReceiver</td>
+          <td style="padding:6px;">CAM1 QThread</td>
+          <td style="padding:6px; color:#aaa;">ZMQ SUB → jpeg decode → inference queue</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:6px;">YOLODetector</td>
+          <td style="padding:6px;">CAM1/2 QThread</td>
+          <td style="padding:6px; color:#aaa;">YOLOv8n ONNX → objects list</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:6px;">ROIChecker</td>
+          <td style="padding:6px;">CAM1 QThread</td>
+          <td style="padding:6px; color:#aaa;">point_in_poly → inside/outside → alert</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:6px;">PPEClassifier</td>
+          <td style="padding:6px;">CAM2 QThread</td>
+          <td style="padding:6px; color:#aaa;">Bbox overlap: person ∩ helmet/vest/boot → violation type</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:6px;">OverlayEngine</td>
+          <td style="padding:6px;">CAM1/2 QThread</td>
+          <td style="padding:6px; color:#aaa;">Vẽ bbox + label + ROI polygon lên frame</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:6px;">MainWindow</td>
+          <td style="padding:6px;">Main</td>
+          <td style="padding:6px; color:#aaa;">PyQt QWidget hiển thị frame + toolbar + popup alert</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:6px;">ROIDrawer</td>
+          <td style="padding:6px;">Main</td>
+          <td style="padding:6px; color:#aaa;">Mouse event → vẽ/kéo/thả polygon trên canvas</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:6px;">AlertManager</td>
+          <td style="padding:6px;">Main</td>
+          <td style="padding:6px; color:#aaa;">Nhận violation → popup + SQLite + WS broadcast</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:6px;">FastAPI Web</td>
+          <td style="padding:6px;">Main (asyncio)</td>
+          <td style="padding:6px; color:#aaa;">REST API + WebSocket alert + history page</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+</div>

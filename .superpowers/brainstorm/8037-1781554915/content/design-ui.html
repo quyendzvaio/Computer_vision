@@ -1,0 +1,148 @@
+<h2>Design — PyQt UI Layout & Interaction</h2>
+<p class="subtitle">Cấu trúc cửa sổ chính, ROI drawing, alert flow</p>
+
+<div class="section">
+  <h3>Main Window Layout</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px;">
+      <pre style="background:#1a1a2e; padding:12px; border-radius:8px; color:#ccc; font-size:12px; line-height:1.6; font-family:monospace;">
+┌──────────────────────────────────────────────────────────────┐
+│ [CV Safety Monitor v2]  —  □ ✕                            │
+├──────────────────────────────────────────────────────────────┤
+│ [Cam1 ▼] [Cam2]  [⏺ Record] [✎ ROI draw] [⚙ Settings]    │ ← Toolbar
+├──────────────────────┬───────────────────────────────────────┤
+│                      │                                       │
+│   ┌──────────────┐   │   ┌──────────────┐                   │
+│   │  CAM1        │   │   │  CAM2        │                   │
+│   │  ROI Zone A──┘   │   │  [HELMET] ✓  │                   │
+│   │  ROI Zone B──┘   │   │  [VEST]   ✗  │ ← ALERT!         │
+│   │  [Person]        │   │  [BOOT]   ✓  │                   │
+│   │  (inside A! )    │   │              │                   │
+│   └──────────────┘   │   └──────────────┘                   │
+│                      │                                       │
+├──────────────────────┴───────────────────────────────────────┤
+│ [Alert] 13:45:02  Person trong vùng cấm Zone A - CAM1       │
+│ [Alert] 13:45:05  NO_VEST - Công nhân - CAM2               │ ← Status bar
+│ [Alert] 13:45:12  Person trong vùng cấm Zone B - CAM1       │
+└──────────────────────────────────────────────────────────────┘</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Chế độ vẽ ROI (ROI Draw Mode)</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-size: 13px; line-height: 1.8;">
+
+      <div style="background:#16213e; border-radius:6px; padding:12px;">
+        <b style="color:#ffb74d;">Kích hoạt:</b> Click nút "✎ ROI draw" trên toolbar → chuột chuyển sang chế độ vẽ<br>
+        <b style="color:#ffb74d;">Thoát:</b> Click lại nút hoặc nhấn ESC
+      </div>
+
+      <div style="margin-top:12px; display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div style="background:#1a1a2e; border-radius:6px; padding:10px;">
+          <b style="color:#4fc3f7;">Vẽ polygon mới</b>
+          <ul style="color:#aaa; font-size:12px; padding-left:16px;">
+            <li>Click → thêm điểm</li>
+            <li>Double-click → đóng polygon</li>
+            <li>Mỗi ROI có màu riêng (A: đỏ, B: xanh, C: vàng)</li>
+            <li>Hiện label "Zone A", "Zone B" trên polygon</li>
+          </ul>
+        </div>
+        <div style="background:#1a1a2e; border-radius:6px; padding:10px;">
+          <b style="color:#81c784;">Chỉnh sửa ROI có sẵn</b>
+          <ul style="color:#aaa; font-size:12px; padding-left:16px;">
+            <li>Kéo điểm → di chuyển vertex</li>
+            <li>Kéo cạnh → di chuyển cả polygon</li>
+            <li>Click phải → delete polygon</li>
+            <li>Luôn snap vào video frame</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>ROI Config — Lưu trữ</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-size: 13px;">
+      <div>ROI polygon được lưu vào SQLite, load khi start:</div>
+      <pre style="background:#1a1a2e; padding:10px; border-radius:6px; color:#ccc; font-size:12px; margin-top:8px;">
+Table: roi_config
+  id         INTEGER PRIMARY KEY
+  camera_id  TEXT NOT NULL        -- 'cam1'
+  zone_name  TEXT NOT NULL        -- 'Zone A', 'Zone B'
+  points     TEXT NOT NULL        -- JSON: [[x1,y1],[x2,y2],...]
+  color      TEXT NOT NULL        -- '#ff0000'
+  enabled    BOOLEAN DEFAULT 1
+
+Table: cameras
+  id         TEXT PRIMARY KEY     -- 'cam1', 'cam2'
+  zmq_port   INTEGER             -- 5555, 5556
+  source     TEXT                -- 'usb0', 'usb2'
+  enabled    BOOLEAN DEFAULT 1</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Alert Flow</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-size: 13px; line-height: 1.8;">
+
+      <div style="background:#1a1a2e; padding:12px; border-radius:8px; font-family:monospace; color:#ccc; font-size:12px;">
+QThread phát hiện violation:
+  → emit alert_signal(violation_dict)  → Main thread slot
+
+Main thread:
+  1. Ghi violation vào SQLite (async via QTimer)
+  2. Update status bar + alert counter
+  3. Flash đỏ border trên camera widget
+  4. Capture snapshot frame → lưu thumbnail
+  5. Broadcast alert qua WebSocket (FastAPI)
+  6. Nếu violation nghiêm trọng → system tray notification
+      </div>
+
+      <div style="margin-top:12px; background:#16213e; border-radius:6px; padding:10px;">
+        <b style="color:#ffb74d;">Alert dedup (Cooldown):</b><br>
+        <span style="color:#aaa;">Mỗi loại violation cho 1 person có cooldown riêng. Ví dụ: Nếu person A đã alert NO_VEST, không alert lại trong 30s cho person A. Tránh spam.</span>
+      </div>
+
+      <div style="margin-top:8px; background:#16213e; border-radius:6px; padding:10px;">
+        <b style="color:#ffb74d;">SQLite Schema — violations:</b><br>
+        <pre style="background:#1a1a2e; padding:8px; border-radius:4px; color:#ccc; font-size:11px; margin-top:4px;">
+Table: violations
+  id           TEXT PRIMARY KEY
+  camera_id    TEXT
+  type         TEXT           -- 'PERSON_IN_ZONE', 'NO_HELMET', 'NO_VEST', 'NO_BOOT'
+  severity     TEXT           -- 'HIGH', 'MEDIUM', 'LOW'
+  zone_name    TEXT           -- NULL nếu là PPE
+  bbox_json    TEXT
+  thumbnail    TEXT           -- path to saved image
+  timestamp    DATETIME DEFAULT CURRENT_TIMESTAMP
+  acknowledged BOOLEAN DEFAULT 0</pre>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>FastAPI Web — Secondary View</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-size: 13px; line-height: 1.8;">
+      <ul>
+        <li><b>Không broadcast frame real-time qua WS</b> — tránh tốn CPU encode</li>
+        <li><b>REST API:</b> GET /violations, GET /cameras, GET /roi/{camera_id}</li>
+        <li><b>WebSocket:</b> Chỉ push alert text (type, camera_id, timestamp)</li>
+        <li><b>History page:</b> Danh sách violation có phân trang + filter</li>
+        <li><b>Admin page:</b> Xem/sửa ROI config, camera config</li>
+      </ul>
+      <div style="background:#16213e; padding:10px; border-radius:6px; margin-top:8px;">
+        <b style="color:#81c784;">FastAPI chạy trong thread riêng:</b><br>
+        <span style="color:#aaa;">Ủy quyền asyncio event loop vào thread riêng, không block main PyQt loop. Dùng QThread mới chạy uvicorn.</span>
+      </div>
+    </div>
+  </div>
+</div>

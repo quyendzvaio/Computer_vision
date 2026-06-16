@@ -1,0 +1,155 @@
+<h2>Design — Error Handling & Testing Strategy</h2>
+<p class="subtitle">Xử lý lỗi edge device, crash, network mất kết nối</p>
+
+<div class="section">
+  <h3>Error Handling — Edge Device</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-size: 13px; line-height: 1.8;">
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+
+        <div style="background:#1a1a2e; border-radius:6px; padding:10px;">
+          <b style="color:#ff8a65;">Camera disconnect</b>
+          <div style="color:#aaa; font-size:12px; margin-top:4px;">
+            USB camera rút ra → cv2.VideoCapture trả False → retry 5 lần (1s interval) → log lỗi → chờ reconnect
+          </div>
+        </div>
+
+        <div style="background:#1a1a2e; border-radius:6px; padding:10px;">
+          <b style="color:#ff8a65;">ZMQ send failure</b>
+          <div style="color:#aaa; font-size:12px; margin-top:4px;">
+            GPU machine restart → ZMQ PUB vẫn gửi (ZMQ queue ở edge) → khi GPU online lại, auto-receive. Không crash.
+          </div>
+        </div>
+
+        <div style="background:#1a1a2e; border-radius:6px; padding:10px;">
+          <b style="color:#ff8a65;">Frame encode lỗi</b>
+          <div style="color:#aaa; font-size:12px; margin-top:4px;">
+            JPEG encode thất bại → skip frame, không retry. Vì frame kế tiếp sẽ đến ngay (30fps).
+          </div>
+        </div>
+
+        <div style="background:#1a1a2e; border-radius:6px; padding:10px;">
+          <b style="color:#ff8a65;">Edge auto-restart</b>
+          <div style="color:#aaa; font-size:12px; margin-top:4px;">
+            systemd service: Restart=always. Script đơn giản, start lại dưới 1s.
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Error Handling — GPU Machine</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-size: 13px; line-height: 1.8;">
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+
+        <div style="background:#1a1a2e; border-radius:6px; padding:10px;">
+          <b style="color:#ff8a65;">ZMQ SUB timeout</b>
+          <div style="color:#aaa; font-size:12px; margin-top:4px;">
+            Không nhận được frame từ edge trong N giây → hiển thị "Disconnected" overlay trên camera widget → retry.
+          </div>
+        </div>
+
+        <div style="background:#1a1a2e; border-radius:6px; padding:10px;">
+          <b style="color:#ff8a65;">Inference crash</b>
+          <div style="color:#aaa; font-size:12px; margin-top:4px;">
+            ONNX session lỗi → log + fallback: vẫn hiển thị frame raw (không detect). Không crash app. User thấy "Detection offline" badge.
+          </div>
+        </div>
+
+        <div style="background:#1a1a2e; border-radius:6px; padding:10px;">
+          <b style="color:#ff8a65;">GPU OOM</b>
+          <div style="color:#aaa; font-size:12px; margin-top:4px;">
+            Nếu 2 model instance cùng OOM → catch exception → giảm batch size → restart model session. Nếu vẫn lỗi → fallback CPU mode.
+          </div>
+        </div>
+
+        <div style="background:#1a1a2e; border-radius:6px; padding:10px;">
+          <b style="color:#ff8a65;">PyQt main loop không block</b>
+          <div style="color:#aaa; font-size:12px; margin-top:4px;">
+            Mọi xử lý nặng đều trong QThread. Main thread chỉ render + events. Nếu QThread crash → signal error → main thread restart thread.
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Testing Strategy</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-size: 13px; line-height: 1.8;">
+
+      <div style="background:#16213e; border-radius:6px; padding:12px;">
+        <b style="color:#81c784;">1. Unit tests (pytest, không cần camera)</b>
+        <ul style="color:#aaa; font-size:12px; margin-top:4px;">
+          <li><b>ROIChecker:</b> point_in_poly với polygon chuẩn, cạnh, ngoài</li>
+          <li><b>PPEChecker:</b> IoU calculation với các bbox overlap khác nhau</li>
+          <li><b>FrameBudget:</b> Mô phỏng frame chậm, kiểm tra skip logic</li>
+          <li><b>AlertManager:</b> Cooldown dedup, duplicate suppression</li>
+        </ul>
+      </div>
+
+      <div style="background:#16213e; border-radius:6px; padding:12px; margin-top:8px;">
+        <b style="color:#81c784;">2. Integration tests (cần GPU)</b>
+        <ul style="color:#aaa; font-size:12px; margin-top:4px;">
+          <li><b>Inference pipeline:</b> Frame → YOLOv8 → objects → output format</li>
+          <li><b>ZMQ round-trip:</b> PUB frame → SUB receive → decode</li>
+          <li><b>Full pipeline CAM1:</b> Frame → detect → ROI → alert</li>
+          <li><b>Full pipeline CAM2:</b> Frame → detect → PPE → alert</li>
+        </ul>
+      </div>
+
+      <div style="background:#16213e; border-radius:6px; padding:12px; margin-top:8px;">
+        <b style="color:#81c784;">3. Edge device simulation (test không cần edge HW)</b>
+        <ul style="color:#aaa; font-size:12px; margin-top:4px;">
+          <li>Script phát lại video file (.mp4) qua ZMQ PUB giả lập edge</li>
+          <li>Test GPU machine với "edge simulator" trên cùng máy</li>
+          <li>Skip frame, disconnect, latency spike đều có thể mô phỏng</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Edge Device Failure Scenarios — Flowchart</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-family: monospace; font-size: 12px; line-height: 1.6; color:#ccc;">
+Edge mất kết nối LAN:
+├─ Edge side: ZMQ PUB vẫn chạy, queue frame ở kernel buffer
+├─ GPU side: ZMQ SUB timeout (ko nhận frame >3s)
+│   ├─ → Overlay "DISCONNECTED" trên widget
+│   ├─ → Log event
+│   └─ → Tiếp tục loop, chờ reconnect
+└─ Khi LAN back online:
+    ├─ ZMQ auto-deliver frame mới nhất
+    └─ GPU: render lại bình thường trong ~1 frame
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Tổng kết Design</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-size: 13px; line-height: 1.8;">
+      <p>Đã present đầy đủ 4 phần:</p>
+      <ol>
+        <li><b>Kiến trúc tổng quan</b> — Edge/PyQt QThread Hybrid ✅</li>
+        <li><b>Data Flow & Frame Budget</b> — ZeroMQ, skip strategy, latency ~24ms ✅</li>
+        <li><b>PyQt UI Layout</b> — Main window, ROI drawing, Alert flow, FastAPI web ✅</li>
+        <li><b>Error Handling & Testing</b> — Graceful degradation, edge simulation ✅</li>
+      </ol>
+      <p style="margin-top:8px; color:#ffb74d;">Bước tiếp theo: Viết spec doc → spec self-review → user review → implementation.</p>
+    </div>
+  </div>
+</div>

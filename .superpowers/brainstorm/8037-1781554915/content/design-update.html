@@ -1,0 +1,138 @@
+<h2>Design Update — Sửa theo Senior Review</h2>
+<p class="subtitle">4 thay đổi chính để tối ưu latency + boots ~60%</p>
+
+<div class="section">
+  <h3>🔧 Thay đổi 1: PPE Pipeline — Crop + Classifier thay vì YOLOv8 multi-class</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-size: 13px; line-height: 1.8;">
+
+      <div style="background:#16213e; border-radius:8px; padding:12px;">
+        <div style="color:#81c784; font-weight:bold; margin-bottom:8px;">Mới: YOLOv8n detect person → crop theo keypoint estimation từ bbox → classifier nhỏ</div>
+        <pre style="background:#1a1a2e; padding:10px; border-radius:6px; color:#ccc; font-size:12px; font-family:monospace;">
+YOLOv8n detect person (640×480) → bbox (x1,y1,x2,y2)
+
+Với mỗi person bbox:
+  ├─ Head crop:   [x1:x2, y1:y1+0.2*h]   → upscale 224×224 → MobileNetV3 → helmet? (60-70%)
+  ├─ Torso crop:  [x1:x2, y1+0.2*h:y2-0.3*h] → upscale 224×224 → MobileNetV3 → vest? (65-75%)
+  └─ Feet crop:   [x1:x2, y2-0.15*h:y2]  → upscale 224×224 → MobileNetV3 → boots? (55-65%)
+
+Mỗi classifier: MobileNetV3-small (ONNX) ~2-5ms trên GPU
+Tổng: 15ms detect + 3×4ms crop + 3×5ms classify ≈ <b>~30ms/frame</b></pre>
+        <div style="margin-top:8px; color:#aaa;">
+          <b>Boots ~60%:</b> Crop vùng chân từ bbox person (15% chiều cao dưới cùng), upscale lên 224×224. Boots chiếm ~80×80px trong crop → classifier thấy rõ. Accuracy 55-65%.<br>
+          <b>So với multi-class YOLOv8 (15-25%):</b> Cải thiện ~3x nhờ upscale.
+        </div>
+      </div>
+
+      <div style="background:#3a1a1a; border-radius:6px; padding:10px; margin-top:8px;">
+        <b>🔴 Đánh đổi:</b> +10-15ms/frame so với YOLOv8 multi-class. Bù lại bằng <b>skip frame strategy</b>: chỉ chạy classifier mỗi 2-3 frame (~10fps cho PPE). Frame không có motion → skip hoàn toàn.
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>🔧 Thay đổi 2: Raw BGR thay vì JPEG</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-size: 13px; line-height: 1.8;">
+      <div style="background:#16213e; border-radius:8px; padding:12px;">
+        <div style="color:#81c784; font-weight:bold;">Cũ: JPEG encode (edge) → ZMQ → decode (GPU) — ~3ms/frame</div>
+        <div style="color:#f44336; font-weight:bold; margin-top:4px;">Mới: Raw BGR → ZMQ → decode 0ms</div>
+        <div style="color:#aaa; margin-top:4px;">
+          LAN 1Gbps: Raw 640×480×3×30fps = 27MB/s — chỉ 2.7% bandwidth. Hoàn toàn chấp nhận được.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>🔧 Thay đổi 3: Web preview 1fps + ZMQ HWM=2</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-size: 13px; line-height: 1.8;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div style="background:#16213e; border-radius:6px; padding:10px;">
+          <b style="color:#81c784;">Web preview 1fps</b>
+          <div style="color:#aaa; font-size:12px; margin-top:4px;">
+            Main thread push frame có overlay vào queue → FastAPI thread lấy mỗi 1s → WS broadcast.<br>
+            Tốn ~2ms CPU mỗi lần encode, không đáng kể.
+          </div>
+        </div>
+        <div style="background:#16213e; border-radius:6px; padding:10px;">
+          <b style="color:#81c784;">ZMQ_SNDHWM = 2</b>
+          <div style="color:#aaa; font-size:12px; margin-top:4px;">
+            Edge device chỉ queue tối đa 2 frame trong kernel buffer. Frame cũ bị drop tự động. Tránh OOM khi GPU xử lý chậm.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>🔧 Thay đổi nhỏ khác</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-size: 13px; line-height: 1.8;">
+      <ul>
+        <li><b>USB device path</b> — Dùng /dev/v4l/by-id/ thay vì index cứng</li>
+        <li><b>QThread crash recovery</b> — try/except run() → restart ≤5 lần/phút</li>
+        <li><b>FastAPI lifecycle</b> — uvicorn.Server với shutdown event</li>
+        <li><b>Auto-save ROI</b> — Mỗi lần vẽ xong tự động lưu SQLite</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Latency Budget (sau sửa)</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-size: 13px;">
+      <table style="width:100%; border-collapse: collapse;">
+        <tr style="border-bottom:1px solid #333;">
+          <th style="text-align:left; padding:8px; color:#4fc3f7;">Giai đoạn</th>
+          <th style="text-align:right; padding:8px; color:#4fc3f7;">CAM1</th>
+          <th style="text-align:right; padding:8px; color:#4fc3f7;">CAM2</th>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:8px;">Edge capture</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">0ms (USB)</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">0ms (USB)</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:8px;">ZMQ network</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">~1ms</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">~1ms</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:8px;">YOLOv8n (GPU)</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">~12ms</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">~12ms</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:8px;">ROI check</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">~1ms</td>
+          <td style="padding:8px; text-align:right; color:#888;">-</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:8px;">Crop + 3×classify</td>
+          <td style="padding:8px; text-align:right; color:#888;">-</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">~17ms*</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:8px;">Overlay draw</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">~1ms</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">~1ms</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222; font-weight:bold;">
+          <td style="padding:8px;">Tổng</td>
+          <td style="padding:8px; text-align:right; color:#ffb74d;">~15ms</td>
+          <td style="padding:8px; text-align:right; color:#ffb74d;">~31ms*</td>
+        </tr>
+      </table>
+      <div style="margin-top:8px; color:#888; font-size:12px;">
+        *CAM2 classify chỉ chạy 1/2-1/3 frames (skip frame strategy) → effective ~15ms/frame.
+      </div>
+    </div>
+  </div>
+</div>

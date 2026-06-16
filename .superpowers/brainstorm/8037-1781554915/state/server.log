@@ -1,0 +1,15 @@
+{"type":"server-started","port":62500,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:62500","screen_dir":"/home/quyen/CV/.superpowers/brainstorm/8037-1781554915/content","state_dir":"/home/quyen/CV/.superpowers/brainstorm/8037-1781554915/state"}
+{"type":"screen-added","file":"/home/quyen/CV/.superpowers/brainstorm/8037-1781554915/content/architecture.html"}
+{"type":"screen-added","file":"/home/quyen/CV/.superpowers/brainstorm/8037-1781554915/content/roi-exit-flow.html"}
+{"type":"screen-added","file":"/home/quyen/CV/.superpowers/brainstorm/8037-1781554915/content/ppe-keypoints.html"}
+{"type":"screen-added","file":"/home/quyen/CV/.superpowers/brainstorm/8037-1781554915/content/tech-roles.html"}
+{"type":"screen-added","file":"/home/quyen/CV/.superpowers/brainstorm/8037-1781554915/content/risks-analysis.html"}
+{"type":"screen-added","file":"/home/quyen/CV/.superpowers/brainstorm/8037-1781554915/content/roi-comparison.html"}
+{"type":"screen-added","file":"/home/quyen/CV/.superpowers/brainstorm/8037-1781554915/content/approaches.html"}
+{"type":"screen-added","file":"/home/quyen/CV/.superpowers/brainstorm/8037-1781554915/content/design-architecture.html"}
+{"type":"screen-added","file":"/home/quyen/CV/.superpowers/brainstorm/8037-1781554915/content/design-dataflow.html"}
+{"type":"screen-added","file":"/home/quyen/CV/.superpowers/brainstorm/8037-1781554915/content/design-ui.html"}
+{"type":"screen-added","file":"/home/quyen/CV/.superpowers/brainstorm/8037-1781554915/content/design-error-test.html"}
+{"type":"screen-added","file":"/home/quyen/CV/.superpowers/brainstorm/8037-1781554915/content/design-update.html"}
+{"type":"screen-added","file":"/home/quyen/CV/.superpowers/brainstorm/8037-1781554915/content/waiting.html"}
+{"type":"server-stopped","reason":"idle timeout"}

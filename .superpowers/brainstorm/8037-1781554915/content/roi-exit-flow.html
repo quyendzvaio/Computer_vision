@@ -1,0 +1,59 @@
+<h2>CAM1 — Phát hiện đối tượng ra khỏi ROI</h2>
+<p class="subtitle">Vẽ 3-4 vùng ROI trên từng camera → phát hiện object rời khỏi zone</p>
+
+<div class="section">
+  <h3>Luồng xử lý chi tiết</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-family: monospace; line-height: 2; font-size: 13px;">
+      <div>1. PyQt QThread đọc frame từ USB Camera1</div>
+      <div>   ↓</div>
+      <div>2. YOLOv8 detect objects (person)</div>
+      <div>   ↓</div>
+      <div>3. Với mỗi person detect được:</div>
+      <div>   ├─ Lấy center point (hoặc foot point) của bounding box</div>
+      <div>   ├─ Kiểm tra point có nằm trong ROI polygon nào không</div>
+      <div>   └─ Nếu có → đánh dấu "inside ROI"</div>
+      <div>   ↓</div>
+      <div>4. Track object theo thời gian (centroid tracking / IoU tracking):</div>
+      <div>   ├─ Nếu frame trước: inside ROI, frame này: outside ROI</div>
+      <div>   └─ → Trigger "Object LEFT zone" alert</div>
+      <div>   ↓</div>
+      <div>5. Gửi frame + overlay qua MediaMTX RTSP<br>
+      <span style="color:#888;">   Đồng thời gửi alert qua WebSocket → Dashboard</span></div>
+      <div>   ↓</div>
+      <div>6. Ghi violation vào SQLite</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>ROI Drawing UX</h3>
+  <p>Cho phép vẽ đa giác (polygon) trực tiếp trên frame video real-time:</p>
+  <ul>
+    <li>Click để thêm điểm, double-click để đóng polygon</li>
+    <li>Kéo thả điểm để điều chỉnh</li>
+    <li>Mỗi ROI có thể gán label: "Vùng cấm", "Khu vực nguy hiểm", "Lối ra"</li>
+    <li>Lưu ROI config vào JSON/DB per camera</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h3>Thuật toán "Object leaving ROI"</h3>
+  <div style="background: #1a1a2e; border: 1px solid #333; border-radius: 6px; padding: 12px; font-family: monospace; font-size: 12px; color: #aaa;">
+<pre>tracker = {}  # object_id → {"inside_roi": bool, "roi_ids": []}
+
+Mỗi frame:
+  detections = yolo(frame)
+  for det in detections:
+    track_id = tracker.update(det)  # IoU / centroid
+    foot_point = (det.x_center, det.y2)  # đáy bbox
+
+    inside = any(point_in_polygon(foot_point, roi) for roi in rois)
+
+    # Transition check
+    if tracker[track_id].inside_roi and not inside:
+      trigger_alert(track_id, "LEFT_ROI", roi_id)
+
+    tracker[track_id].inside_roi = inside</pre>
+  </div>
+</div>

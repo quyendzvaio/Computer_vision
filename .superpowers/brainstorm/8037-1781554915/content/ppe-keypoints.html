@@ -1,0 +1,72 @@
+<h2>CAM2 — PPE Detection via YOLO-Pose Keypoints</h2>
+<p class="subtitle">Dùng keypoints skeleton thay vì bounding box overlap để detect thiếu bảo hộ</p>
+
+<div class="section">
+  <h3>Ý tưởng: Keypoint-based PPE detection</h3>
+  <p>Thay vì detect "người" + "mũ/áo/giày" riêng rẽ rồi kiểm tra overlap (dễ sai khi object nhỏ), dùng YOLO-Pose để lấy khung xương người, sau đó phân tích từng vùng trên cơ thể:</p>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-family: monospace; line-height: 2; font-size: 13px;">
+      <div>YOLO-Pose output: 17 keypoints (COCO format)</div>
+      <div>   ├─ 0: nose          ├─ 5: left_shoulder   ├─ 10: right_wrist</div>
+      <div>   ├─ 1: left_eye      ├─ 6: right_shoulder  ├─ 11: left_hip</div>
+      <div>   ├─ 2: right_eye     ├─ 7: left_elbow      ├─ 12: right_hip</div>
+      <div>   ├─ 3: left_ear      ├─ 8: right_elbow     ├─ 13: left_knee</div>
+      <div>   └─ 4: right_ear     ├─ 9: left_wrist      ├─ 14: right_knee</div>
+      <div>                        ├─ 15: left_ankle</div>
+      <div>                        └─ 16: right_ankle</div>
+      <div style="border-top: 1px solid #333; margin: 8px 0;"></div>
+      <div style="color: #81c784;"><b>Phân tích:</b></div>
+      <div>   • <b>Vùng đầu</b> (nose + ears + eyes) → crop → classifier nhỏ: có mũ bảo hộ không?</div>
+      <div>   • <b>Vùng thân trên</b> (shoulders → hips) → crop → classifier: có áo bảo hộ không?</div>
+      <div>   • <b>Vùng chân</b> (ankles + knees) → crop → classifier: có giày bảo hộ không?</div>
+      <div style="border-top: 1px solid #333; margin: 8px 0;"></div>
+      <div style="color: #ffb74d;"><b>Ưu điểm so với bbox overlap:</b></div>
+      <div>   • Keypoints cho biết CHÍNH XÁC vị trí từng bộ phận</div>
+      <div>   • Crop đúng vùng cần kiểm tra → classifier nhẹ hơn</div>
+      <div>   • Không bị nhiễu khi mũ/áo/giày nhỏ trong bbox tổng</div>
+      <div>   • Có thể threshold theo confidence từng keypoint</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Phân luồng xử lý CAM2</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-family: monospace; line-height: 2; font-size: 13px;">
+      <div>1. QThread đọc frame từ USB Camera2</div>
+      <div>2. YOLO-Pose inference → 17 keypoints per person</div>
+      <div>3. Với mỗi person có keypoints:</div>
+      <div>   ├─ Head crop (nose ± shoulder_width) → Classifier: helmet?</div>
+      <div>   ├─ Torso crop (shoulders → hips) → Classifier: vest?</div>
+      <div>   └─ Feet crop (ankles ± offset) → Classifier: boots?</div>
+      <div>4. Nếu bất kỳ classifier nào → "NO" → trigger violation</div>
+      <div>5. Overlay kết quả lên frame → MediaMTX → Dashboard</div>
+      <div>6. Ghi violation vào SQLite</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Latency Optimization Strategy</h3>
+  <div class="split">
+    <div class="mockup" style="flex:1;">
+      <div class="mockup-header" style="font-size: 12px;">Frame pipeline</div>
+      <div class="mockup-body" style="font-size: 11px; padding: 8px;">
+        <div>Frame N → YOLO-Pose → crop → classify(small CNN)</div>
+        <div style="color:#888;">Frame N+1 → (skip classify nếu pose conf thấp)</div>
+        <div style="color:#888;">Frame N+2 → process đầy đủ</div>
+        <div style="margin-top:8px;">👉 <b>Motion skip:</b> Bỏ qua frame nếu không có chuyển động</div>
+      </div>
+    </div>
+    <div class="mockup" style="flex:1;">
+      <div class="mockup-header" style="font-size: 12px;">QThread model</div>
+      <div class="mockup-body" style="font-size: 11px; padding: 8px;">
+        <div>QThread1: capture + inference + draw</div>
+        <div>(tất cả trong 1 thread, queue-based)</div>
+        <div style="margin-top:8px;">👉 <b>Zero-copy:</b> Frame buffer reuse</div>
+        <div>👉 <b>No IPC:</b> shared memory loại bỏ</div>
+        <div>👉 <b>Direct-to-GPU:</b> OpenGL widget</div>
+      </div>
+    </div>
+  </div>
+</div>

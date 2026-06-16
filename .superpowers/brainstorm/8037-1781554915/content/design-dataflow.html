@@ -1,0 +1,147 @@
+<h2>Design — Data Flow & Frame Budget</h2>
+<p class="subtitle">Chiến lược frame pacing giữa các thread để tối ưu latency</p>
+
+<div class="section">
+  <h3>Edge → GPU: ZeroMQ PUB/SUB</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-family: monospace; font-size: 13px; line-height: 1.8;">
+      <div>Edge device gửi <b>JPEG encoded frame</b> (không phải raw BGR) qua ZMQ:</div>
+      <pre style="background:#1a1a2e; padding:10px; border-radius:6px; color:#ccc; font-size:12px; margin-top:8px;">
+USB Cam1 @ 30fps → JPEG encode (~2ms) → ZMQ PUB topic "cam1" :5555
+USB Cam2 @ 30fps → JPEG encode (~2ms) → ZMQ PUB topic "cam2" :5556</pre>
+      <div style="margin-top:8px; background:#16213e; padding:10px; border-radius:6px;">
+        <b style="color:#81c784;">Tại sao JPEG?</b><br>
+        <span style="color:#aaa;">Raw BGR 640×480 = 921KB/frame. JPEG 640×480 ~50KB/frame → <b>18x nhỏ hơn</b>. Latency network giảm tương ứng. GPU machine decode JPEG (~1ms) vẫn nhanh hơn truyền raw frame.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Frame Budget — Mỗi QThread tự điều tiết</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-family: monospace; font-size: 13px; line-height: 1.8;">
+      <div>Mỗi QThread có vòng lặp chính với <b>deadline cố định</b>:</div>
+      <pre style="background:#1a1a2e; padding:10px; border-radius:6px; color:#ccc; font-size:12px; margin-top:8px;">
+FRAME_BUDGET = 33ms  # ~30fps target
+
+Mỗi iteration:
+  t0 = time()
+  frame = recv() or skip_queue
+  objects = infer(frame)     # YOLOv8n GPU: ~10-15ms
+  check(objects)             # ROI or PPE: ~1-2ms
+  overlay = draw(objects)    # ~2ms
+  emit_signal(overlay)       # signal/slot: ~0.1ms
+
+  elapsed = time() - t0
+  if elapsed > FRAME_BUDGET:
+    skip = next_frame        # skip queue để bắt kịp
+    print(f"[Cam1] Slow frame: {elapsed:.0f}ms, skip next")
+</pre>
+      <div style="margin-top:8px; background:#16213e; padding:10px; border-radius:6px;">
+        <b style="color:#81c784;">Chiến lược skip:</b><br>
+        <span style="color:#aaa;">Nếu 1 frame chậm (vd: nhiều object → detect lâu hơn) → skip frame kế tiếp. Không dùng queue dồn frame — queue dài gây tăng latency tích lũy. Chỉ giữ <b>latest frame</b> (queued) để luôn xử lý frame mới nhất.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>CAM1 Pipeline — ROI Inside</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-size: 13px; line-height: 1.8;">
+      <pre style="background:#1a1a2e; padding:10px; border-radius:6px; color:#ccc; font-size:12px;">
+Frame → YOLOv8n detect person → foot point (x_center, y2)
+  → Với mỗi person:
+    → Với mỗi ROI polygon:
+      → point_in_poly(foot_point, roi)?
+    → Nếu inside bất kỳ ROI nào:
+      → Nếu chưa trigger timeout cho person này → ALERT "person_in_zone"
+      → Set cooldown (tránh alert trùng trong N giây)</pre>
+      <div style="margin-top:8px; color:#aaa;">
+        <b>Chi tiết:</b> "person trong vùng cấm" là violation. Dùng foot point (đáy bbox) thay vì center để tránh trường hợp phần thân trên ở trong vùng cấm nhưng chân ở ngoài.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>CAM2 Pipeline — PPE Detection</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-size: 13px; line-height: 1.8;">
+      <pre style="background:#1a1a2e; padding:10px; border-radius:6px; color:#ccc; font-size:12px;">
+Frame → YOLOv8n detect person + helmet + vest + boot
+  → Với mỗi person (bbox P):
+    → helmet_found = any(helmet_bbox & P có IoU > 0.3)
+    → vest_found = any(vest_bbox & P có IoU > 0.2)
+    → boot_found = any(boot_bbox & P có IoU > 0.1)
+    → Nếu thiếu cái nào → ALERT "NO_HELMET" / "NO_VEST" / "NO_BOOT"</pre>
+      <div style="margin-top:8px; background:#16213e; padding:10px; border-radius:6px;">
+        <b style="color:#ffb74d;">Lưu ý IoU threshold khác nhau:</b><br>
+        <span style="color:#aaa;">Helmet (mũ) = overlap nhiều với phần đầu → 0.3. Vest (áo) = phủ thân → 0.2. Boot (giày) = nhỏ, ở dưới cùng → 0.1. Có thể cần tuning.
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Main Thread — Render & Alert</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-size: 13px; line-height: 1.8;">
+      <div>QThread emit signal → Main thread slot nhận frame + objects:</div>
+      <ul>
+        <li><b>QLabel/QWidget:</b> Hiển thị 2 camera side-by-side hoặc tab</li>
+        <li><b>QPainter overlay:</b> Vẽ bbox + label + ROI polygon</li>
+        <li><b>ROI drawing mode:</b> Mouse click → add point, double-click → close polygon, drag → move point</li>
+        <li><b>Alert popup:</b> QSystemTrayIcon + notification + splash frame với ảnh violation</li>
+        <li><b>FastAPI async:</b> Thread chạy song song với main loop, serve web secondary</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Latency Budget Dự Kiến</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 16px; font-size: 13px;">
+      <table style="width:100%; border-collapse: collapse;">
+        <tr style="border-bottom:1px solid #333;">
+          <th style="text-align:left; padding:8px; color:#4fc3f7;">Giai đoạn</th>
+          <th style="text-align:right; padding:8px; color:#4fc3f7;">Latency</th>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:8px;">Edge: capture + JPEG encode</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">~5ms</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:8px;">ZMQ network (LAN)</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">~1ms</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:8px;">GPU: receive + JPEG decode</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">~2ms</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:8px;">YOLOv8n inference (GPU)</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">~12ms</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:8px;">ROI/PPE check</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">~2ms</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:8px;">Overlay draw</td>
+          <td style="padding:8px; text-align:right; color:#81c784;">~2ms</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+          <td style="padding:8px; font-weight:bold;">Tổng (end-to-end)</td>
+          <td style="padding:8px; text-align:right; color:#ffb74d; font-weight:bold;">~24ms</td>
+        </tr>
+      </table>
+      <div style="margin-top:8px; color:#888; font-size:12px;">
+        ≈ 40fps throughput. Với skip frame khi quá tải, đảm bảo latency ổn định dưới 33ms (30fps) cho cả 2 camera.
+      </div>
+    </div>
+  </div>
+</div>
