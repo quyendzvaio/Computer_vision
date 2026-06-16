@@ -25,7 +25,8 @@ class YOLODetector:
     def __init__(self, model_path: str = str(MODEL_PATH),
                  providers: Optional[List[str]] = None):
         if providers is None:
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            available = onnxruntime.get_available_providers()
+            providers = [p for p in ["CUDAExecutionProvider", "CPUExecutionProvider"] if p in available]
         self.session = onnxruntime.InferenceSession(model_path, providers=providers)
         self.input_name = self.session.get_inputs()[0].name
         _, _, self.input_h, self.input_w = self.session.get_inputs()[0].shape
@@ -39,9 +40,20 @@ class YOLODetector:
         return img
 
     def postprocess(self, outputs: np.ndarray, orig_shape) -> List[DetectedObject]:
-        """Parse YOLOv8 output into DetectedObject list."""
+        """Parse YOLOv8 output into DetectedObject list.
+
+        Handles shape variants:
+          - (1, 84, 8400)  — ultralytics standard export
+          - (1, 8400, 84)  — some export variants
+          - (8400, 84)     — already squeezed
+        """
         output = outputs[0]
-        output = np.transpose(output, (1, 0))  # (num_boxes, 84)
+        # Squeeze batch dim if present
+        if output.ndim == 3:
+            output = output[0] if output.shape[0] == 1 else output.squeeze()
+        # Normalize to (num_boxes, 84) via transpose if needed
+        if output.shape[0] == 84 and output.shape[1] != 84:
+            output = output.T  # (84, 8400) → (8400, 84)
 
         boxes, scores = [], []
         for pred in output:

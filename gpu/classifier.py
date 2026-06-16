@@ -31,12 +31,19 @@ class PPEClassifier:
         self.class_names = CLASS_NAMES[item]
         if model_path is None:
             model_path = str(MODELS_DIR / f"{item}.onnx")
+        if not Path(model_path).exists():
+            print(f"[PPEClassifier] Model {model_path} not found — {item} disabled")
+            self.session = None
+            self.input_name = ""
+            return
         if providers is None:
             providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
         self.session = onnxruntime.InferenceSession(model_path, providers=providers)
         self.input_name = self.session.get_inputs()[0].name
 
     def predict(self, crop: np.ndarray) -> Tuple[str, float]:
+        if self.session is None:
+            return self.class_names[0], 0.0
         """Classify a BGR crop (224×224 or will be resized).
 
         Returns:

@@ -40,6 +40,8 @@ class Cam2Thread(QThread):
         self._running = True
         self._prev_gray: Optional[np.ndarray] = None
         self._disconnected = False
+        self._frame_skip = 3
+        self._frame_count = 0
 
     def stop(self):
         self._running = False
@@ -73,12 +75,22 @@ class Cam2Thread(QThread):
             except zmq.Again:
                 if not self._disconnected:
                     self._disconnected = True
-                    d = draw_disconnected(np.zeros((480, 640, 3), dtype=np.uint8))
+                    d = draw_disconnected(np.zeros((240, 320, 3), dtype=np.uint8))
                     self.frame_ready.emit("cam2", d)
                 continue
 
             self._disconnected = False
-            frame = np.frombuffer(data, dtype=np.uint8).reshape((480, 640, 3))
+            # Decode JPEG frame
+            frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if frame is None:
+                continue
+
+            self._frame_count += 1
+            if self._frame_count % self._frame_skip != 0:
+                self.frame_ready.emit("cam2", frame)
+                continue
+
+            t_start = time.perf_counter()
 
             # Level 1: motion skip
             if not self._has_motion(frame):

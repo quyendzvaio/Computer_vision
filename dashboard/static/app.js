@@ -212,10 +212,10 @@
 
   async function fetchViolationCount() {
     try {
-      var today = new Date().toISOString().split('T')[0];
-      var resp = await fetch('/api/violations?from_time=' + today + 'T00:00:00&to_time=' + today + 'T23:59:59&limit=1000');
-      var todayRows = await resp.json();
-      violationCount.today = Array.isArray(todayRows) ? todayRows.length : 0;
+      var resp = await fetch('/api/violations?limit=1000');
+      var data = await resp.json();
+      var rows = data.violations || [];
+      violationCount.today = rows.length;
       updateViolationStats();
     } catch (e) {
       console.warn('Failed to load violation count:', e);

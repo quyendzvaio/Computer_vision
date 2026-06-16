@@ -36,6 +36,8 @@ class Cam1Thread(QThread):
         self._roi_checker = roi_checker
         self._running = True
         self._disconnected = False
+        self._frame_skip = 3
+        self._frame_count = 0
 
     def stop(self):
         self._running = False
@@ -59,14 +61,26 @@ class Cam1Thread(QThread):
             except zmq.Again:
                 if not self._disconnected:
                     self._disconnected = True
-                    d = draw_disconnected(np.zeros((480, 640, 3), dtype=np.uint8))
+                    d = draw_disconnected(np.zeros((240, 320, 3), dtype=np.uint8))
                     self.frame_ready.emit("cam1", d)
                 continue
 
             self._disconnected = False
-            frame = np.frombuffer(data, dtype=np.uint8).reshape((480, 640, 3))
+            # Decode JPEG frame
+            frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if frame is None:
+                continue
 
+            self._frame_count += 1
+            if self._frame_count % self._frame_skip != 0:
+                # Skip detection this frame, still show frame
+                self.frame_ready.emit("cam1", frame)
+                continue
+
+            t_start = time.perf_counter()
             persons = self._detector.detect(frame)
+            detect_ms = (time.perf_counter() - t_start) * 1000
+            print(f"[Cam1] {len(persons)} persons detected in {detect_ms:.0f}ms")
 
             alerts = []
             for person in persons:

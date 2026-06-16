@@ -8,7 +8,7 @@ FROM python:3.11-slim
 
 # OpenCV + PyQt5 offscreen system libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libglib2.0-0 libgomp1 \
+    libgl1 libglib2.0-0 libgomp1 \
     libxcb-xinerama0 libxcb-icccm4 libxcb-image0 \
     libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
     libxcb-shape0 libxcb-xfixes0 libxcb-xkb1 \
@@ -23,12 +23,12 @@ RUN sed -i 's/opencv-python/opencv-python-headless/' requirements.txt && \
     pip install --no-cache-dir -r requirements.txt
 
 # PyQt5 (needed by gpu/ modules)
-RUN pip install --no-cache-dir PyQt5
+RUN pip install --no-cache-dir PyQt5 pyzmq
 
 # Application
 COPY gpu/ gpu/
 COPY shared/ shared/
-# for config parsing
+COPY dashboard/ dashboard/
 COPY edge/ edge/
 
 EXPOSE 8080

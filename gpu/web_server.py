@@ -4,13 +4,17 @@ Runs in a QThread with uvicorn.Server for clean lifecycle.
 """
 import asyncio
 import base64
+import json
 import threading
-from queue import Queue
+from pathlib import Path
+from queue import Queue, Empty
 from typing import Optional
 
 import cv2
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from PyQt5.QtCore import QThread
 import uvicorn
 
@@ -48,6 +52,7 @@ class ConnectionManager:
 
 ws_manager = ConnectionManager()
 preview_queue: Queue = Queue(maxsize=2)
+_preview_event = threading.Event()
 
 
 def push_preview(camera_id: str, frame_bgr: np.ndarray):
@@ -61,6 +66,7 @@ def push_preview(camera_id: str, frame_bgr: np.ndarray):
     if ret:
         b64 = base64.b64encode(buf.tobytes()).decode()
         preview_queue.put_nowait({"camera_id": camera_id, "frame_base64": b64})
+        _preview_event.set()
 
 
 class WebServer(QThread):
@@ -76,22 +82,58 @@ class WebServer(QThread):
     def run(self):
         app = FastAPI(title="CV Safety Monitor v2")
 
+        static_dir = Path(__file__).parent.parent / "dashboard" / "static"
+        if static_dir.exists():
+            app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+            @app.get("/")
+            async def root():
+                return FileResponse(str(static_dir / "index.html"))
+
+            @app.get("/admin.html")
+            async def admin_page():
+                return FileResponse(str(static_dir / "admin.html"))
+
+            @app.get("/history.html")
+            async def history_page():
+                return FileResponse(str(static_dir / "history.html"))
+        else:
+            @app.get("/")
+            async def root():
+                return {
+                    "app": "CV Safety Monitor v2",
+                    "version": "0.1.0",
+                    "endpoints": {
+                        "cameras": "/api/cameras",
+                        "roi": "/api/roi/{camera_id}",
+                        "violations": "/api/violations",
+                        "websocket": "/ws/dashboard",
+                        "docs": "/docs",
+                    }
+                }
+
         @app.on_event("startup")
         def startup():
             app.state.db = self._db
 
         @app.get("/api/cameras")
         async def list_cameras():
-            return {"cameras": get_cameras(self._db)}
+            return get_cameras(self._db)
 
         @app.get("/api/roi/{camera_id}")
         async def get_roi_api(camera_id: str):
-            return {"rois": get_rois(self._db, camera_id)}
+            rois = get_rois(self._db, camera_id)
+            if not rois:
+                return {"polygon": []}
+            # Return first enabled ROI's polygon as flat coords
+            points = json.loads(rois[0]["points_json"])
+            return {"polygon": points}
 
         @app.put("/api/roi/{camera_id}")
         async def save_roi_api(camera_id: str, data: dict):
-            save_roi(self._db, camera_id, data["zone_name"],
-                     data["points"], data.get("color", "#ff0000"))
+            polygon = data.get("polygon", data.get("points", []))
+            save_roi(self._db, camera_id, "default-zone",
+                     polygon, data.get("color", "#ff0000"))
             return {"status": "ok"}
 
         @app.get("/api/violations")
@@ -106,9 +148,14 @@ class WebServer(QThread):
         @app.websocket("/ws/dashboard")
         async def dashboard_ws(ws: WebSocket):
             await ws_manager.connect(ws)
+            loop = asyncio.get_running_loop()
             try:
                 while True:
-                    if not preview_queue.empty():
+                    # Wait for preview event in thread-safe way
+                    await loop.run_in_executor(None, _preview_event.wait)
+                    _preview_event.clear()
+                    # Drain queue
+                    while True:
                         try:
                             preview = preview_queue.get_nowait()
                             await ws.send_json({
@@ -116,9 +163,8 @@ class WebServer(QThread):
                                 "camera_id": preview["camera_id"],
                                 "frame_base64": preview["frame_base64"],
                             })
-                        except Exception:
-                            pass
-                    await asyncio.sleep(1)
+                        except Empty:
+                            break
             except WebSocketDisconnect:
                 ws_manager.disconnect(ws)
 

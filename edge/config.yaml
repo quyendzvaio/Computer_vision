@@ -1,18 +1,19 @@
 # Edge device config for CV Safety Monitor v2
 # GPU server address (change to your server IP)
-gpu_host: 192.168.1.100
+gpu_host: 172.20.10.3
+
+# JPEG quality 0-100 (lower = smaller bandwidth, lower quality)
+jpeg_quality: 55
 
 cameras:
   - id: cam1
-    # Windows: USB camera index (0, 1, 2...)
-    # Linux:   /dev/video0
     device_path: 0
     zmq_port: 5555
-    fps: 15
-    resolution: [640, 480]
+    fps: 5
+    resolution: [320, 240]
 
   - id: cam2
     device_path: 1
     zmq_port: 5556
-    fps: 15
-    resolution: [640, 480]
+    fps: 5
+    resolution: [320, 240]
