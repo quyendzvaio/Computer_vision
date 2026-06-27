@@ -15,4 +15,7 @@ venv/
 *.png
 *.mp4
 *.avi
-!data/.gitkeep
+*.db
+*.db-journal
+*.db-wal
+data/

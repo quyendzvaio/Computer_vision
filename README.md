@@ -1,118 +1,129 @@
-# CV Safety Monitor v2
+# CV Safety Monitor
 
-AI camera safety monitor. Detects zone intrusion + PPE violations (helmet/vest/boot) in realtime.
+Realtime multi-camera safety monitoring system. Detects zone intrusion and PPE violations (helmet/vest/boot) using YOLOv8n + ROI-first optimization on NVIDIA GPU.
 
-## Architecture
+**Target hardware:** Windows PC with NVIDIA Quadro T2000 (4GB VRAM)
+
+## Architecture (Phase 1 — GPU mode)
 
 ```
-┌── Windows Edge (NATIVE) ────┐      ┌── Ubuntu GPU Server (DOCKER) ─┐
-│                              │      │                               │
-│  edge/sender.py              │      │  Container: cv-server          │
-│  ┌──────────┐  ┌─────────┐  │      │  ┌──────────┐  ┌───────────┐  │
-│  │ USB Cam1 │→│ ZMQ PUB │──┼──TCP──┼─→│ZMQ SUB   │→│ YOLOv8    │  │
-│  │ USB Cam2 │→│ ZMQ PUB │──┼──TCP──┼─→│ cam thread│  │ detect    │  │
-│  └──────────┘  └─────────┘  │ :5555 │  └──────────┘  ├───────────┤  │
-│                              │ :5556 │              │ ROI check │  │
-│  Dependencies: opencv, pyzmq │      │              ├───────────┤  │
-│  No Docker (USB passthrough  │      │              │ WebServer │  │
-│  impossible on Windows)       │      │              │ :8080     │  │
-└──────────────────────────────┘      │              └───────────┘  │
-                                       │                             │
-                                       │  Dependencies: ONNX, PyQt5  │
-                                       │  (offscreen), FastAPI        │
-                                       └─────────────────────────────┘
+Windows (native)
+   USB Cam1 ──ZMQ PUB──→ Cam1Thread ──YOLOv8n(detect_roi)──→ ROIChecker → AlertManager
+   USB Cam2 ──ZMQ PUB──→ Cam2Thread ──YOLOv8n(detect_roi)──→ PPEChecker + ROIChecker → AlertManager
+                                          ↓
+                                    WebServer (:8080)
+                                          ↓
+                                    Dashboard (browser)
 ```
 
-| Component | Platform | Chạy bằng |
-|---|---|---|
-| Edge sender | Windows | `python edge/sender.py` (native) |
-| GPU server | Ubuntu | `docker compose -f docker-compose.gpu.yml up` |
-| Dashboard | Browser | http://server-ip:8080 |
+| Layer | Tech |
+|-------|------|
+| Capture | OpenCV → ZMQ PUB (320×240 @5fps) |
+| Detection | YOLOv8n ONNX on `onnxruntime-gpu` (CUDA) |
+| ROI | Crop-to-detect: chỉ inference trên vùng ROI bounding box |
+| PPE | MobileNetV3 binary classifiers (helmet/vest/boot) |
+| UI | PyQt5 (desktop) + FastAPI/WebSocket (web dashboard) |
+| DB | SQLite (violations, ROI config, cameras) |
+
+### ROI-first detection
+
+Không dùng OpenVINO hay TensorRT. Thay vào đó, crop frame về bounding box của ROI zone trước khi detect:
+
+- Full frame 640×640: ~10ms
+- ROI crop 50% frame: ~5ms (**-50%**)
+- ROI crop 25% frame: ~3ms (**-70%**)
+
+Accuracy trong ROI zone: không đổi (detect trên crop thay vì full frame).
 
 ## Setup
 
-### 1. GPU Server (Ubuntu + Docker)
-
-```bash
-# Clone
-git clone <repo> && cd CV
-
-# Download model
-mkdir -p gpu/models
-wget -O gpu/models/yolov8n.onnx \
-  https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n.onnx
-
-# Build & run
-docker compose -f docker-compose.gpu.yml up -d
-```
-
-**Check logs:**
-```bash
-docker logs -f cv-server
-```
-
-Mở firewall:
-```bash
-sudo ufw allow 5555/tcp
-sudo ufw allow 5556/tcp
-sudo ufw allow 8080/tcp
-```
-
-### 2. Windows Edge (Native)
+### 1. GPU Machine (Windows)
 
 ```powershell
-# Python 3.10+ required
+git clone <repo> && cd CV
+
+# Download YOLOv8n ONNX
+mkdir gpu\models
+curl -L -o gpu\models\yolov8n.onnx ^
+  https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n.onnx
+
+# Python env
 python -m venv venv
 .\venv\Scripts\activate
+pip install -r requirements-gpu.txt
 
+# Configure cameras
+notepad edge\config.yaml
+```
+
+### 2. Edge Machine (Windows)
+
+```powershell
+python -m venv venv
+.\venv\Scripts\activate
 pip install -r edge\requirements.txt
 
-# Edit config — set server IP
+# Edit config → gpu_host: <SERVER_IP>
 notepad edge\config.yaml
-# → gpu_host: <SERVER_IP>
-# → device_path: 0 (USB index)
 
-# Run
 python edge\sender.py
 ```
 
-### 3. Open Dashboard
+### 3. Server
 
-Browser → http://server-ip:8080
+```powershell
+python -m gpu.main
+```
+
+Dashboard: http://localhost:8080
+
+## Project Layout
+
+```
+CV/
+├── edge/                   # Edge: capture + ZMQ send
+│   ├── sender.py           # USB cam → JPEG → ZMQ PUB
+│   ├── config.yaml         # Cam config + server IP
+│   └── requirements.txt
+├── gpu/                    # Server: receive → detect → serve
+│   ├── main.py             # PyQt5 app coordinator
+│   ├── cam1_thread.py      # Cam1: zone intrusion detection
+│   ├── cam2_thread.py      # Cam2: PPE + zone detection
+│   ├── detector.py         # YOLOv8n ONNX (CUDA) + detect_roi()
+│   ├── roi_checker.py      # ROI bounds + point-in-polygon
+│   ├── classifier.py       # MobileNetV3 PPE classifiers
+│   ├── ppe_checker.py      # PPE violation logic
+│   ├── overlay.py          # Bbox + label drawing
+│   ├── alert_manager.py    # Cooldown + DB logging
+│   ├── database.py         # SQLite helpers
+│   ├── web_server.py       # FastAPI + WebSocket
+│   ├── roi_drawer.py       # PyQt ROI drawing overlay
+│   ├── camera_widget.py    # PyQt camera widget
+│   ├── main_window.py      # PyQt main window
+│   └── models/             # YOLOv8n ONNX (gitignored)
+├── shared/
+│   ├── models.py           # Data models (BBox, Detection, etc.)
+├── tests/gpu/              # Phase 1 tests
+├── requirements-gpu.txt
+└── edge/requirements.txt
+```
 
 ## Config
 
 `edge/config.yaml`:
 
 ```yaml
-gpu_host: 192.168.1.100   # GPU server IP
-
+gpu_host: 192.168.1.100      # GPU server IP
+jpeg_quality: 55              # JPEG compression (0-100)
 cameras:
   - id: cam1
-    device_path: 0         # USB index (Windows) / /dev/video0 (Linux)
-    zmq_port: 5555         # must match docker-compose
-    fps: 15
-    resolution: [640, 480]
-```
-
-## Project Layout
-
-```
-CV/
-├── edge/               # Edge device: capture + ZMQ send
-│   ├── sender.py       # Windows: OpenCV → ZMQ PUB loop
-│   ├── config.yaml     # Camera config + server IP
-│   └── requirements.txt
-├── gpu/                # GPU server: ZMQ SUB → detect → web
-│   ├── main.py         # Entry: PyQt5 app + cam threads
-│   ├── cam1_thread.py  # CAM1: person in zone
-│   ├── cam2_thread.py  # CAM2: PPE classification
-│   ├── detector.py     # YOLOv8n ONNX
-│   ├── web_server.py   # FastAPI + WebSocket
-│   └── models/         # YOLO ONNX files (gitignored)
-├── shared/             # Data models
-├── Dockerfile.gpu      # Server container
-├── Dockerfile.edge     # Linux edge container (ko dùng cho Windows)
-├── docker-compose.gpu.yml
-└── requirements.txt    # Server deps
+    device_path: 0            # USB index
+    zmq_port: 5555
+    fps: 5
+    resolution: [320, 240]
+  - id: cam2
+    device_path: 1
+    zmq_port: 5556
+    fps: 5
+    resolution: [320, 240]
 ```

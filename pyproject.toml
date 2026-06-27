@@ -1,9 +1,3 @@
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests/gpu"]
 addopts = "-p no:cacheprovider"
-markers = [
-    "v1: tests for legacy v1 architecture",
-]
-filterwarnings = [
-    "ignore::DeprecationWarning",
-]
