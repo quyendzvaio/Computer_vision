@@ -85,8 +85,13 @@ def get_cameras(conn: sqlite3.Connection) -> List[dict]:
 # --- ROI ---
 
 def save_roi(conn: sqlite3.Connection, camera_id: str, zone_name: str, points: list, color: str = "#ff0000"):
+    # Delete old ROI for this camera+zone, then insert new
     conn.execute(
-        "INSERT OR REPLACE INTO roi_config (camera_id, zone_name, points_json, color) VALUES (?, ?, ?, ?)",
+        "DELETE FROM roi_config WHERE camera_id=? AND zone_name=?",
+        (camera_id, zone_name),
+    )
+    conn.execute(
+        "INSERT INTO roi_config (camera_id, zone_name, points_json, color) VALUES (?, ?, ?, ?)",
         (camera_id, zone_name, json.dumps(points), color),
     )
     conn.commit()

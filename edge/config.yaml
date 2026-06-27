@@ -1,5 +1,6 @@
 # Edge device config for CV Safety Monitor v2
-# GPU server address (change to your server IP)
+# GPU server address
+# Edge uses network_mode:host → 127.0.0.1 works because GPU publishes ports
 gpu_host: 172.20.10.3
 
 # JPEG quality 0-100 (lower = smaller bandwidth, lower quality)

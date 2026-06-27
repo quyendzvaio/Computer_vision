@@ -78,6 +78,7 @@ class WebServer(QThread):
         self._port = port
         self._db = db_conn
         self._alert_manager = alert_manager
+        self.on_roi_saved = None  # callback: on_roi_saved(camera_id)
 
     def run(self):
         app = FastAPI(title="CV Safety Monitor v2")
@@ -134,6 +135,10 @@ class WebServer(QThread):
             polygon = data.get("polygon", data.get("points", []))
             save_roi(self._db, camera_id, "default-zone",
                      polygon, data.get("color", "#ff0000"))
+            # Reload ROI into the running camera thread
+            cb = self.on_roi_saved
+            if cb:
+                cb(camera_id)
             return {"status": "ok"}
 
         @app.get("/api/violations")
