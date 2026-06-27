@@ -38,9 +38,12 @@ class CVApp:
         self._detector_cam2 = YOLODetector()
         self._ppe_manager = PPEManager()
 
-        # ROI checker
-        rois_cam1 = get_rois(self._db, "cam1")
-        self._roi_checker = ROIChecker(rois_cam1)
+        # ROI checkers — frame size matches edge ZMQ stream (320×240)
+        FRAME_W, FRAME_H = 320, 240
+        self._roi_checkers = {
+            "cam1": ROIChecker(get_rois(self._db, "cam1"), frame_size=(FRAME_W, FRAME_H)),
+            "cam2": ROIChecker(get_rois(self._db, "cam2"), frame_size=(FRAME_W, FRAME_H)),
+        }
 
         # Alert manager
         self._alert_manager = AlertManager(self._db, on_alert=self._on_alert_fired)
@@ -59,20 +62,22 @@ class CVApp:
 
         # Camera threads
         self._cameras = get_cameras(self._db)
-        self._threads = []
+        self._threads: list = []
+        self._cam_threads: dict = {}
         for cam in self._cameras:
             cam_id = cam["id"]
             port = cam["zmq_port"]
+            roi_checker = self._roi_checkers.get(cam_id, ROIChecker())
             if cam_id == "cam1":
-                t = Cam1Thread(port, self._detector_cam1, self._roi_checker)
-                t.frame_ready.connect(self._on_frame_ready)
-                t.alert.connect(self._on_alert)
-                self._threads.append(t)
+                t = Cam1Thread(port, self._detector_cam1, roi_checker)
             elif cam_id == "cam2":
-                t = Cam2Thread(port, self._detector_cam2, self._ppe_manager)
-                t.frame_ready.connect(self._on_frame_ready)
-                t.alert.connect(self._on_alert)
-                self._threads.append(t)
+                t = Cam2Thread(port, self._detector_cam2, self._ppe_manager, roi_checker)
+            else:
+                continue
+            t.frame_ready.connect(self._on_frame_ready)
+            t.alert.connect(self._on_alert)
+            self._threads.append(t)
+            self._cam_threads[cam_id] = t
 
         # Start camera threads
         for t in self._threads:
@@ -80,9 +85,20 @@ class CVApp:
 
         # Web server
         self._web = WebServer(self._db, self._alert_manager)
+        self._web.on_roi_saved = self._on_roi_saved_web
         self._web.start()
 
         self._window.show()
+
+    def _on_roi_saved_web(self, camera_id: str):
+        """Reload ROI into camera thread when saved via web admin."""
+        rois = get_rois(self._db, camera_id)
+        thread = self._cam_threads.get(camera_id)
+        if thread and hasattr(thread, 'update_rois'):
+            thread.update_rois(rois)
+        checker = self._roi_checkers.get(camera_id)
+        if checker:
+            checker.reload(rois)
 
     def _init_cameras(self):
         if not get_cameras(self._db):
@@ -138,6 +154,14 @@ class CVApp:
     def _save_roi(self, camera_id: str, zone_name: str, points: list):
         from gpu.database import save_roi
         save_roi(self._db, camera_id, zone_name, points)
+        # Reload into thread
+        rois = get_rois(self._db, camera_id)
+        thread = self._cam_threads.get(camera_id)
+        if thread and hasattr(thread, 'update_rois'):
+            thread.update_rois(rois)
+        checker = self._roi_checkers.get(camera_id)
+        if checker:
+            checker.reload(rois)
 
     def run(self):
         sys.exit(self._qapp.exec_())

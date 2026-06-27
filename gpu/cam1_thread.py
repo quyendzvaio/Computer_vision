@@ -78,9 +78,11 @@ class Cam1Thread(QThread):
                 continue
 
             t_start = time.perf_counter()
-            persons = self._detector.detect(frame)
+            roi_bounds = self._roi_checker.get_bounds()
+            persons = self._detector.detect_roi(frame, roi_bounds)
             detect_ms = (time.perf_counter() - t_start) * 1000
-            print(f"[Cam1] {len(persons)} persons detected in {detect_ms:.0f}ms")
+            if persons:
+                print(f"[Cam1] {len(persons)} persons in {detect_ms:.0f}ms")
 
             alerts = []
             for person in persons:

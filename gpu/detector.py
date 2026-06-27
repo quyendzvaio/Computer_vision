@@ -92,3 +92,31 @@ class YOLODetector:
         input_tensor = self.preprocess(frame)
         outputs = self.session.run(None, {self.input_name: input_tensor})
         return self.postprocess(outputs, (orig_h, orig_w))
+
+    def detect_roi(self, frame: np.ndarray,
+                   roi_bounds: Optional[Tuple[int, int, int, int]]
+                   ) -> List[DetectedObject]:
+        """ROI-first detection: crop to ROI → detect → offset bboxes to original frame.
+
+        Args:
+            frame: Full BGR frame.
+            roi_bounds: (x, y, w, h) of ROI crop, or None for full-frame fallback.
+
+        Returns:
+            List of DetectedObject with bboxes in original frame coordinates.
+        """
+        if roi_bounds is None:
+            return self.detect(frame)
+
+        rx, ry, rw, rh = roi_bounds
+        if rw < 32 or rh < 32:  # ponytail: too small to detect anything useful
+            return []
+
+        crop = frame[ry:ry + rh, rx:rx + rw]
+        objects = self.detect(crop)
+        for obj in objects:
+            obj.bbox.x1 += rx
+            obj.bbox.y1 += ry
+            obj.bbox.x2 += rx
+            obj.bbox.y2 += ry
+        return objects

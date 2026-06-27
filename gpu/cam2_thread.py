@@ -1,11 +1,11 @@
-"""CAM2 QThread: ZMQ SUB -> YOLOv8 detect -> crop -> PPE classify -> overlay.
+"""CAM2 QThread: ZMQ SUB -> YOLOv8 detect -> crop -> PPE classify -> ROI -> overlay.
 
 Two-level skip:
   1. Motion detection: skip YOLOv8 if no motion.
   2. Classify skip: run classifiers every N frames even with motion.
 """
 import time
-from typing import Optional
+from typing import List, Optional
 
 import cv2
 import numpy as np
@@ -15,9 +15,10 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from gpu.detector import YOLODetector
 from gpu.classifier import PPEManager
 from gpu.ppe_checker import PPEChecker
+from gpu.roi_checker import ROIChecker
 from gpu.overlay import (
-    draw_person_bboxes, draw_ppe_labels, draw_disconnected,
-    draw_detection_offline,
+    draw_person_bboxes, draw_ppe_labels, draw_roi_polygons,
+    draw_disconnected, draw_detection_offline,
 )
 
 
@@ -26,17 +27,18 @@ MOTION_THRESHOLD = 30.0
 
 
 class Cam2Thread(QThread):
-    """CAM2 pipeline: receive frame -> detect persons -> PPE classify -> overlay."""
+    """CAM2 pipeline: receive frame -> detect persons -> PPE classify -> ROI check -> overlay."""
     frame_ready = pyqtSignal(str, np.ndarray)
     alert = pyqtSignal(dict)
 
     def __init__(self, zmq_port: int, detector: YOLODetector,
-                 ppe_manager: PPEManager, parent=None):
+                 ppe_manager: PPEManager, roi_checker: ROIChecker, parent=None):
         super().__init__(parent)
         self._port = zmq_port
         self._detector = detector
         self._ppe_manager = ppe_manager
         self._ppe_checker = PPEChecker(ppe_manager)
+        self._roi_checker = roi_checker
         self._running = True
         self._prev_gray: Optional[np.ndarray] = None
         self._disconnected = False
@@ -45,6 +47,9 @@ class Cam2Thread(QThread):
 
     def stop(self):
         self._running = False
+
+    def update_rois(self, rois: List[dict]):
+        self._roi_checker.reload(rois)
 
     def _has_motion(self, frame: np.ndarray) -> bool:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -98,7 +103,8 @@ class Cam2Thread(QThread):
                 continue
 
             try:
-                persons = self._detector.detect(frame)
+                roi_bounds = self._roi_checker.get_bounds()
+                persons = self._detector.detect_roi(frame, roi_bounds)
                 model_ok = True
             except Exception:
                 if model_ok:
@@ -106,13 +112,33 @@ class Cam2Thread(QThread):
                     self.frame_ready.emit("cam2", draw_detection_offline(frame))
                 continue
 
+            # ROI check — persons inside restricted zones
+            zone_alerts = []
+            for person in persons:
+                foot_point = (person.bbox.x1 + person.bbox.width / 2, person.bbox.y2)
+                zones = self._roi_checker.check_person(foot_point)
+                for zone in zones:
+                    zone_alerts.append({
+                        "type": "PERSON_IN_ZONE",
+                        "zone_name": zone["zone_name"],
+                        "person_idx": id(person) & 0xFFFF,
+                        "bbox": person.bbox,
+                    })
+
             # Level 2: classify skip (internal counter)
             alerts = self._ppe_checker.process_persons(frame, persons)
 
             overlay = draw_person_bboxes(frame, persons)
             overlay = draw_ppe_labels(overlay, persons, alerts)
+            overlay = draw_roi_polygons(overlay, self._roi_checker._rois)
 
             self.frame_ready.emit("cam2", overlay)
+
+            # Emit zone alerts (PERSON_IN_ZONE)
+            for alert_dict in zone_alerts:
+                self.alert.emit(alert_dict)
+
+            # Emit PPE alerts
             for alert_dict in alerts:
                 for v in alert_dict["violations"]:
                     self.alert.emit({
