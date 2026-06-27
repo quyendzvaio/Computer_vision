@@ -2,18 +2,19 @@
 
 Realtime multi-camera safety monitoring system. Detects zone intrusion and PPE violations (helmet/vest/boot) using YOLOv8n + ROI-first optimization on NVIDIA GPU.
 
-**Target hardware:** Windows PC with NVIDIA Quadro T2000 (4GB VRAM)
+**Target hardware:**
+- **Server:** Ubuntu 22.04 + NVIDIA GPU (Quadro T2000, RTX, etc.) — Docker container
+- **Edge:** Windows — native (USB passthrough impossible in Docker on Windows)
 
-## Architecture (Phase 1 — GPU mode)
+## Architecture
 
 ```
-Windows (native)
-   USB Cam1 ──ZMQ PUB──→ Cam1Thread ──YOLOv8n(detect_roi)──→ ROIChecker → AlertManager
-   USB Cam2 ──ZMQ PUB──→ Cam2Thread ──YOLOv8n(detect_roi)──→ PPEChecker + ROIChecker → AlertManager
-                                          ↓
-                                    WebServer (:8080)
-                                          ↓
-                                    Dashboard (browser)
+ Windows (edge)                           Ubuntu (server)
+   USB Cam1 ──ZMQ PUB───:5555──→ Docker container
+   USB Cam2 ──ZMQ PUB───:5556──→ ├── cam1_thread → detect_roi() → ROIChecker
+                                     ├── cam2_thread → detect_roi() → PPEChecker + ROIChecker
+                                     ├── AlertManager (cooldown + DB)
+                                     └── WebServer (:8080) → Dashboard (browser)
 ```
 
 | Layer | Tech |
@@ -22,7 +23,7 @@ Windows (native)
 | Detection | YOLOv8n ONNX on `onnxruntime-gpu` (CUDA) |
 | ROI | Crop-to-detect: chỉ inference trên vùng ROI bounding box |
 | PPE | MobileNetV3 binary classifiers (helmet/vest/boot) |
-| UI | PyQt5 (desktop) + FastAPI/WebSocket (web dashboard) |
+| UI | PyQt5 (offscreen) + FastAPI/WebSocket (web dashboard) |
 | DB | SQLite (violations, ROI config, cameras) |
 
 ### ROI-first detection
@@ -37,45 +38,50 @@ Accuracy trong ROI zone: không đổi (detect trên crop thay vì full frame).
 
 ## Setup
 
-### 1. GPU Machine (Windows)
+### 1. Server (Ubuntu + Docker)
+
+```bash
+git clone <repo> && cd CV
+
+# Download YOLOv8n ONNX
+mkdir -p gpu/models
+wget -O gpu/models/yolov8n.onnx \
+  https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n.onnx
+
+# Edit config — set gpu_host = server IP (Windows edge will connect to this)
+nano edge/config.yaml
+# → gpu_host: <SERVER_IP>
+
+# Build & run (requires nvidia-container-toolkit)
+sudo docker compose up -d
+
+# Check logs
+sudo docker logs -f cv-server
+
+# Firewall
+sudo ufw allow 5555/tcp
+sudo ufw allow 5556/tcp
+sudo ufw allow 8080/tcp
+```
+
+### 2. Edge Machine (Windows — native)
 
 ```powershell
 git clone <repo> && cd CV
 
-# Download YOLOv8n ONNX
-mkdir gpu\models
-curl -L -o gpu\models\yolov8n.onnx ^
-  https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n.onnx
-
-# Python env
-python -m venv venv
-.\venv\Scripts\activate
-pip install -r requirements-gpu.txt
-
-# Configure cameras
-notepad edge\config.yaml
-```
-
-### 2. Edge Machine (Windows)
-
-```powershell
 python -m venv venv
 .\venv\Scripts\activate
 pip install -r edge\requirements.txt
 
-# Edit config → gpu_host: <SERVER_IP>
+# Edit config — set gpu_host to server IP, device_path for USB cameras
 notepad edge\config.yaml
 
 python edge\sender.py
 ```
 
-### 3. Server
+### 3. Dashboard
 
-```powershell
-python -m gpu.main
-```
-
-Dashboard: http://localhost:8080
+Browser → http://<SERVER_IP>:8080
 
 ## Project Layout
 
@@ -104,6 +110,8 @@ CV/
 ├── shared/
 │   ├── models.py           # Data models (BBox, Detection, etc.)
 ├── tests/gpu/              # Phase 1 tests
+├── Dockerfile              # GPU server container
+├── docker-compose.yml      # Docker Compose for Ubuntu server
 ├── requirements-gpu.txt
 └── edge/requirements.txt
 ```

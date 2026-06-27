@@ -1,0 +1,12 @@
+__pycache__
+*.pyc
+*.pyo
+.git
+*.md
+tests/
+data/
+.venv
+venv/
+.claude/
+.codegraph/
+.superpowers/
