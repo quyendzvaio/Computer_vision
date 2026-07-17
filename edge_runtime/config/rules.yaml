@@ -1,0 +1,32 @@
+rois: []
+ppe:
+  negative_confidence: 0.65
+  positive_confidence: 0.60
+  minimum_positive_samples: 3
+  sample_window: 5
+  recovery_samples: 2
+fall:
+  window_ms: 3500
+  minimum_visible_keypoint_ratio: 0.45
+  upright_angle_deg: 25
+  abnormal_angle_deg: 55
+  normalized_descent_velocity: 0.8
+  normalized_horizontal_velocity: 0.75
+  angular_velocity_deg_s: 60
+  candidate_score: 0.55
+  confirmation_score: 0.72
+  recovery_score: 0.35
+  maximum_transition_ms: 1200
+  persistence_ms: 800
+  inactivity_ms: 500
+  recovery_ms: 1500
+  roi_minimum_overlap_frames: 3
+  roi_minimum_overlap_duration_ms: 250
+  roi_minimum_region_overlap_ratio: 0.10
+  weights:
+    descent: 0.25
+    rotation: 0.20
+    horizontal_motion: 0.10
+    posture: 0.20
+    persistence: 0.15
+    inactivity: 0.10

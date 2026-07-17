@@ -19,3 +19,10 @@ venv/
 *.db-journal
 *.db-wal
 data/
+models/**/*.onnx
+models/**/*.pth
+models/**/*.engine
+models/**/mmdeploy-work/
+deployment/edge-windows/edge-runtime.exe
+deployment/edge-windows/WinSW-x64.exe
+.venv-edge/

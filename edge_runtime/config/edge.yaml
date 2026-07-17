@@ -1,0 +1,12 @@
+version: 1
+device_id: edge-01
+scheduler:
+  max_frame_age_ms: 500
+  detector_batch_size: 1
+  inference_timeout_ms: 1000
+  idle_poll_ms: 5
+  circuit_breaker_failures: 3
+  circuit_breaker_reset_ms: 10000
+  pose_fps_low: 2
+  pose_fps_medium: 6
+  pose_fps_high: 12

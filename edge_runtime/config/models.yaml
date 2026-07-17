@@ -1,0 +1,40 @@
+models:
+  - name: person-detector
+    role: detector
+    version: rtmdet-nano-05d8511e-mmdeploy
+    path: models/detector/rtmdet_nano_320_person.onnx
+    backend: onnxruntime
+    provider: CUDAExecutionProvider
+    precision: fp32
+    input_shape: [320, 320]
+    enabled: false
+    warmup_runs: 2
+    timeout_ms: 1000
+    output_format: mmdeploy-dets-labels
+    score_threshold: 0.35
+  - name: human-pose
+    role: pose
+    version: body7-420e-acd4a1ef
+    path: models/rtmpose/rtmpose_s_body7_256x192.onnx
+    backend: onnxruntime
+    provider: CUDAExecutionProvider
+    precision: fp32
+    input_shape: [256, 192]
+    enabled: false
+    warmup_runs: 2
+    timeout_ms: 1000
+    sha256: 9aeb635b83f86aea45cf45d85798f7eba1a162de8e0d721c44e54fe5eebaf47d
+    output_format: simcc-coco17
+    keypoint_threshold: 0.30
+  - name: ppe-detector
+    role: ppe
+    version: pretrained-placeholder
+    path: models/ppe/ppe_detector.onnx
+    backend: onnxruntime
+    provider: CUDAExecutionProvider
+    precision: fp32
+    input_shape: [640, 640]
+    enabled: false
+    warmup_runs: 2
+    timeout_ms: 1000
+    output_format: explicit-negative-ppe

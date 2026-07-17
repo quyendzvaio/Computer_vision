@@ -1,0 +1,18 @@
+<service>
+  <id>ConstructionSafetyEdge</id>
+  <name>Construction Safety Edge Runtime</name>
+  <description>USB capture, CUDA inference and safety analytics on the Windows edge device.</description>
+  <executable>%BASE%\..\..\.venv-edge\Scripts\python.exe</executable>
+  <arguments>-m edge_runtime.main --config-dir edge_runtime/config</arguments>
+  <workingdirectory>%BASE%\..\..</workingdirectory>
+  <startmode>Automatic</startmode>
+  <stoptimeout>15sec</stoptimeout>
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <onfailure action="none" />
+  <resetfailure>1 hour</resetfailure>
+  <log mode="roll-by-size">
+    <sizeThreshold>10485760</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+</service>

@@ -1,8 +1,12 @@
+# GPU machine — Quadro T2000 / CUDA 12.x
 PyQt5>=5.15.0
 opencv-python-headless>=4.8.0
 numpy>=1.24.0
-onnxruntime-gpu>=1.16.0
+# onnxruntime-gpu >=1.18 supports TensorRT EP
+onnxruntime-gpu>=1.18.0
 pyzmq>=25.0.0
 fastapi>=0.100.0
 uvicorn[standard]>=0.23.0
 pyyaml>=6.0
+scipy>=1.11,<2
+shapely>=2.0,<3

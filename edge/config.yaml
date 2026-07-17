@@ -1,18 +1,20 @@
 # Edge device config for CV Safety Monitor v2
-gpu_host: 172.20.10.3  # GPU server IP (change to match your network)
+# Quadro T2000 (4GB VRAM) — can handle 640×480 @ 5fps comfortably
+# Reduce resolution for CPU-only server (see alternatives below)
+gpu_host: 172.20.10.3
 
-# JPEG quality 0-100 (lower = smaller bandwidth, lower quality)
-jpeg_quality: 55
+# JPEG quality: 65 balances bandwidth vs PPE detection clarity
+jpeg_quality: 65
 
 cameras:
   - id: cam1
     device_path: 0
     zmq_port: 5555
     fps: 5
-    resolution: [320, 240]
+    resolution: [640, 480]
 
   - id: cam2
     device_path: 1
     zmq_port: 5556
     fps: 5
-    resolution: [320, 240]
+    resolution: [640, 480]

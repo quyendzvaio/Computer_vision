@@ -1,0 +1,8 @@
+# CPU-only server — no GPU deps, uses OpenVINO OR onnxruntime CPU
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+onnxruntime>=1.18.0
+pyzmq>=25.0.0
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+pyyaml>=6.0

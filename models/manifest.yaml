@@ -1,0 +1,56 @@
+version: 2
+policy:
+  pretrained_only: true
+  checksum_required: true
+  silent_cpu_fallback: false
+models:
+  person-detector:
+    role: detector
+    implementation: RTMDet-nano person
+    source: https://github.com/open-mmlab/mmpose/tree/main/projects/rtmpose
+    checkpoint_url: https://download.openmmlab.com/mmpose/v1/projects/rtmpose/rtmdet_nano_8xb32-100e_coco-obj365-person-05d8511e.pth
+    checkpoint_sha256: 05d8511e7b3fabc62e27d2f624179e004ad14ee63a86ca9d9d22c88f3db0eee1
+    checkpoint_path: models/source/rtmdet_nano_8xb32-100e_coco-obj365-person-05d8511e.pth
+    runtime_path: models/detector/rtmdet_nano_320_person.onnx
+    export:
+      tool: MMDeploy
+      deploy_config: configs/mmdet/detection/detection_onnxruntime_static.py
+      model_config: projects/rtmpose/rtmdet/person/rtmdet_nano_320-8xb32_coco-person.py
+    input:
+      shape_nchw: [1, 3, 320, 320]
+      color: BGR
+      mean: [103.53, 116.28, 123.675]
+      std: [57.375, 57.12, 58.395]
+      resize: keep-ratio-bottom-right-pad-114
+    output:
+      format: mmdeploy-dets-labels
+      names: [dets, labels]
+      class_map: {0: person}
+    status: requires-reproducible-mmdeploy-export
+  human-pose:
+    role: pose
+    implementation: RTMPose-s body7 COCO-17 SimCC
+    source: https://github.com/open-mmlab/mmpose/tree/main/projects/rtmpose
+    archive_url: https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-s_simcc-body7_pt-body7_420e-256x192-acd4a1ef_20230504.zip
+    archive_sha256: 7673922e531014906ca4f0f239b7e233b740146a10b632deaa2a28d45470d802
+    archive_member_suffix: rtmpose-s_simcc-body7_pt-body7_420e-256x192-acd4a1ef_20230504/end2end.onnx
+    runtime_path: models/rtmpose/rtmpose_s_body7_256x192.onnx
+    runtime_sha256: 9aeb635b83f86aea45cf45d85798f7eba1a162de8e0d721c44e54fe5eebaf47d
+    input:
+      names: [input]
+      shape_nchw: [batch, 3, 256, 192]
+      color: RGB
+      mean: [123.675, 116.28, 103.53]
+      std: [58.395, 57.12, 57.375]
+      bbox_padding: 1.25
+    output:
+      format: simcc-coco17
+      names: [simcc_x, simcc_y]
+      shapes: [[batch, 17, 384], [batch, 17, 512]]
+      simcc_split_ratio: 2.0
+    status: verified
+  ppe-detector:
+    role: ppe
+    status: unavailable
+    reason: No vetted pretrained artifact with explicit bare_head/no_vest/no_shoes classes is pinned yet.
+    behavior: UNVERIFIABLE

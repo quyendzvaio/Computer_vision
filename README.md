@@ -1,137 +1,144 @@
-# CV Safety Monitor
+# Construction Safety Monitor
 
-Realtime multi-camera safety monitoring system. Detects zone intrusion and PPE violations (helmet/vest/boot) using YOLOv8n + ROI-first optimization on NVIDIA GPU.
+Edge-first construction safety monitoring for two or three USB cameras. The
+NVIDIA edge device owns capture and AI analytics; the Ubuntu CPU server is only
+the control plane and event/media store.
 
-**Target hardware:**
-- **Server:** Ubuntu 22.04 + NVIDIA GPU (Quadro T2000, RTX, etc.) — Docker container
-- **Edge:** Windows — native (USB passthrough impossible in Docker on Windows)
+## Implementation status
+
+Phase 1 foundation and the Phase 2 inference core are implemented:
+
+- one generic capture process per enabled camera;
+- process-safe single-slot latest-frame buffers;
+- camera reconnect health and a supervisor watchdog;
+- typed, versioned configuration and normalized ROI schemas;
+- one model registry for all cameras with strict execution-provider policy;
+- fair bounded detector scheduling and bounded pose-priority scheduling;
+- edge liveness, readiness and Prometheus text metrics;
+- CPU-only FastAPI/control-plane and Docker Compose skeleton;
+- idempotent event, heartbeat, metrics and configuration API contracts.
+- RTMDet MMDeploy preprocessing/postprocessing and shared runtime wiring;
+- verified RTMPose-s SimCC preprocessing, decoding and full-frame mapping;
+- one ByteTrack state machine per camera with `(camera_id, track_id)` identity;
+- keypoint-derived head, torso, feet and upper-body ROI evidence geometry;
+- a native Windows edge service package using WinSW.
+
+The official RTMPose ONNX and RTMDet source checkpoint are checksum-pinned and
+can be fetched locally. RTMDet still requires the official MMDeploy export, and
+PPE remains `UNVERIFIABLE` until vetted explicit-negative pretrained weights
+are pinned. Models stay disabled by default and realtime performance still
+requires a benchmark on the actual Windows edge GPU and USB cameras.
 
 ## Architecture
 
+```text
+EDGE — Quadro T2000 4 GB
+USB cameras → isolated capture processes → latest-frame buffers
+            → shared GPU scheduler → tracking/pose/PPE/fall rules
+            → event outbox/media → HTTPS
+
+UBUNTU SERVER — CPU only
+Nginx → FastAPI → PostgreSQL/MinIO → dashboard/event worker
 ```
- Windows (edge)                           Ubuntu (server)
-   USB Cam1 ──ZMQ PUB───:5555──→ Docker container
-   USB Cam2 ──ZMQ PUB───:5556──→ ├── cam1_thread → detect_roi() → ROIChecker
-                                     ├── cam2_thread → detect_roi() → PPEChecker + ROIChecker
-                                     ├── AlertManager (cooldown + DB)
-                                     └── WebServer (:8080) → Dashboard (browser)
-```
 
-| Layer | Tech |
-|-------|------|
-| Capture | OpenCV → ZMQ PUB (320×240 @5fps) |
-| Detection | YOLOv8n ONNX on `onnxruntime-gpu` (CUDA) |
-| ROI | Crop-to-detect: chỉ inference trên vùng ROI bounding box |
-| PPE | MobileNetV3 binary classifiers (helmet/vest/boot) |
-| UI | PyQt5 (offscreen) + FastAPI/WebSocket (web dashboard) |
-| DB | SQLite (violations, ROI config, cameras) |
+Detection always runs on the full analytics frame. Normalized ROI polygons are
+applied later to the relevant head, torso, shoe or fall evidence; the runtime
+does not crop the ROI before person detection.
 
-### ROI-first detection
-
-Không dùng OpenVINO hay TensorRT. Thay vào đó, crop frame về bounding box của ROI zone trước khi detect:
-
-- Full frame 640×640: ~10ms
-- ROI crop 50% frame: ~5ms (**-50%**)
-- ROI crop 25% frame: ~3ms (**-70%**)
-
-Accuracy trong ROI zone: không đổi (detect trên crop thay vì full frame).
-
-## Setup
-
-### 1. Server (Ubuntu + Docker)
+## Validate the edge configuration
 
 ```bash
-git clone <repo> && cd CV
-
-# Download YOLOv8n ONNX
-mkdir -p gpu/models
-wget -O gpu/models/yolov8n.onnx \
-  https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n.onnx
-
-# Edit config — set gpu_host = server IP (Windows edge will connect to this)
-nano edge/config.yaml
-# → gpu_host: <SERVER_IP>
-
-# Build & run (requires nvidia-container-toolkit)
-sudo docker compose up -d
-
-# Check logs
-sudo docker logs -f cv-server
-
-# Firewall
-sudo ufw allow 5555/tcp
-sudo ufw allow 5556/tcp
-sudo ufw allow 8080/tcp
+python3 -m edge_runtime.main \
+  --config-dir edge_runtime/config \
+  --validate-only
 ```
 
-### 2. Edge Machine (Windows — native)
+The example cameras and model entries are deliberately disabled. Replace the
+camera placeholders with stable `/dev/v4l/by-id/...` paths and validate model
+weights/checksums before setting `enabled: true`.
 
-```powershell
-git clone <repo> && cd CV
+Configuration is split across:
 
-python -m venv venv
-.\venv\Scripts\activate
-pip install -r edge\requirements.txt
+- `edge_runtime/config/edge.yaml`: device and scheduler settings;
+- `edge_runtime/config/cameras.yaml`: independent camera rates and paths;
+- `edge_runtime/config/models.yaml`: model path/provider/precision;
+- `edge_runtime/config/rules.yaml`: PPE and fall thresholds plus normalized ROI.
 
-# Edit config — set gpu_host to server IP, device_path for USB cameras
-notepad edge\config.yaml
+On production Linux, install the service template from
+`deployment/edge/edge-runtime.service`. The health endpoints default to:
 
-python edge\sender.py
+- `GET http://127.0.0.1:8090/health/live`
+- `GET http://127.0.0.1:8090/health/ready`
+- `GET http://127.0.0.1:8090/metrics`
+
+Readiness remains false until at least one camera and all required pretrained
+models are enabled and healthy. There is no silent CUDA-to-CPU fallback.
+
+## Prepare Phase-2 pretrained models
+
+```bash
+python3 scripts/fetch_pretrained_models.py --model all
+python3 scripts/verify_pretrained_models.py
 ```
 
-### 3. Dashboard
+Export RTMDet with `scripts/export_rtmdet_onnx.py` from an official MMDeploy +
+MMPose environment, then re-run verification with `--require-detector`. See
+`docs/phase2-model-and-geometry.md` for the exact contracts and
+`deployment/edge-windows/README.md` for native Windows service installation.
 
-Browser → http://<SERVER_IP>:8080
+## Run the server stack
 
-## Project Layout
-
-```
-CV/
-├── edge/                   # Edge: capture + ZMQ send
-│   ├── sender.py           # USB cam → JPEG → ZMQ PUB
-│   ├── config.yaml         # Cam config + server IP
-│   └── requirements.txt
-├── gpu/                    # Server: receive → detect → serve
-│   ├── main.py             # PyQt5 app coordinator
-│   ├── cam1_thread.py      # Cam1: zone intrusion detection
-│   ├── cam2_thread.py      # Cam2: PPE + zone detection
-│   ├── detector.py         # YOLOv8n ONNX (CUDA) + detect_roi()
-│   ├── roi_checker.py      # ROI bounds + point-in-polygon
-│   ├── classifier.py       # MobileNetV3 PPE classifiers
-│   ├── ppe_checker.py      # PPE violation logic
-│   ├── overlay.py          # Bbox + label drawing
-│   ├── alert_manager.py    # Cooldown + DB logging
-│   ├── database.py         # SQLite helpers
-│   ├── web_server.py       # FastAPI + WebSocket
-│   ├── roi_drawer.py       # PyQt ROI drawing overlay
-│   ├── camera_widget.py    # PyQt camera widget
-│   ├── main_window.py      # PyQt main window
-│   └── models/             # YOLOv8n ONNX (gitignored)
-├── shared/
-│   ├── models.py           # Data models (BBox, Detection, etc.)
-├── tests/gpu/              # Phase 1 tests
-├── Dockerfile              # GPU server container
-├── docker-compose.yml      # Docker Compose for Ubuntu server
-├── requirements-gpu.txt
-└── edge/requirements.txt
+```bash
+cp deployment/server/.env.example deployment/server/.env
+# Replace every example credential and pin the MinIO image.
+docker compose \
+  --env-file deployment/server/.env \
+  -f deployment/server/compose.yaml \
+  up --build
 ```
 
-## Config
+The Compose stack contains Nginx, API, dashboard, event-worker, PostgreSQL and
+MinIO and requests no NVIDIA runtime. PostgreSQL/MinIO adapters and Alembic
+migrations arrive in Phase 4; the current API intentionally uses an in-memory
+repository and returns HTTP 503 for media presigning.
 
-`edge/config.yaml`:
+## Tests
 
-```yaml
-gpu_host: 192.168.1.100      # GPU server IP
-jpeg_quality: 55              # JPEG compression (0-100)
-cameras:
-  - id: cam1
-    device_path: 0            # USB index
-    zmq_port: 5555
-    fps: 5
-    resolution: [320, 240]
-  - id: cam2
-    device_path: 1
-    zmq_port: 5556
-    fps: 5
-    resolution: [320, 240]
+```bash
+pytest -q tests/phase1
+pytest -q tests/phase1 tests/phase2
+pytest -q
 ```
+
+The broader legacy prototype suite can be run with `pytest -q tests`. Some
+legacy tests are known to fail independently of the new runtime and are kept
+visible during migration rather than rewritten to validate obsolete behavior.
+
+## Model policy
+
+Only pretrained models are in scope. The intended stack is:
+
+- RTMDet-tiny/nano pretrained person detector, with a lightweight pretrained
+  YOLO backend allowed behind the same interface if integration is more stable;
+- RTMPose-s pretrained body pose model at 256×192;
+- ByteTrack per camera (no learned weights);
+- a pretrained PPE detector that exposes explicit negative classes such as
+  `bare_head`, `no_safety_vest` and `no_safety_shoes`.
+
+Absence of positive PPE detection is never sufficient to produce a violation.
+Unobservable body regions return `UNVERIFIABLE`; missing weights return
+`MODEL_UNAVAILABLE`.
+
+See [Phase 1 foundation](docs/phase1-foundation.md),
+[Phase 2 model and geometry](docs/phase2-model-and-geometry.md), and
+[fall analytics design](docs/fall-design.md) for migration boundaries and the
+rule-based temporal design. Hardware validation is defined in the
+[Quadro T2000 benchmark plan](docs/benchmark-plan.md).
+
+## Legacy code
+
+The root `main.py` plus `edge/`, `gpu/`, `inference/`, `alert/` and the old
+dashboard are deprecated prototypes. They are retained temporarily for safe
+migration, but the new `edge_runtime/` and `server/` packages never import them.
+Do not run `gpu.database.init_db()` against production data because the legacy
+function performs destructive table drops.

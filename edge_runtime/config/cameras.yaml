@@ -1,0 +1,17 @@
+cameras:
+  - camera_id: cam-01
+    device_path: /dev/v4l/by-id/REPLACE_WITH_STABLE_CAMERA_ID_1
+    enabled: false
+    resolution: [1280, 720]
+    capture_fps: 15
+    analytics_fps: 6
+    preview_fps: 3
+    clip_fps: 15
+  - camera_id: cam-02
+    device_path: /dev/v4l/by-id/REPLACE_WITH_STABLE_CAMERA_ID_2
+    enabled: false
+    resolution: [1280, 720]
+    capture_fps: 15
+    analytics_fps: 6
+    preview_fps: 3
+    clip_fps: 15

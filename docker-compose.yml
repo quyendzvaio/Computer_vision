@@ -1,13 +1,16 @@
 services:
   cv-server:
-    build: .
+    profiles: ["gpu"]
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: cv-safety-server:latest
     container_name: cv-server
     restart: unless-stopped
     ports:
-      - "5555:5555"   # ZMQ cam1
-      - "5556:5556"   # ZMQ cam2
-      - "8080:8080"   # Web dashboard
+      - "5555:5555"
+      - "5556:5556"
+      - "8080:8080"
     volumes:
       - ./data:/app/data
       - ./gpu/models:/app/gpu/models:ro
@@ -23,3 +26,22 @@ services:
               count: all
               capabilities: [gpu]
     shm_size: 256m
+
+  cv-server-cpu:
+    profiles: ["cpu"]
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    image: cv-safety-server-cpu:latest
+    container_name: cv-server-cpu
+    restart: unless-stopped
+    ports:
+      - "5555:5555"
+      - "5556:5556"
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./edge/config.yaml:/app/edge/config.yaml:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    shm_size: 128m

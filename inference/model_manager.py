@@ -1,209 +1,162 @@
-"""OpenVINO model manager — loads YOLOv8 ONNX→IR models and runs inference."""
-import time
+"""ModelManager — loads ONNX model and runs CPU inference.
+
+ROI-first optimization: caller crops frame to ROI region BEFORE calling
+detect(), so the model sees fewer pixels = faster inference.
+
+Architecture decisions (by user request):
+- onnxruntime CPU only (no OpenVINO, no TensorRT)
+- Async-friendly: load() is a sync init, but run() is re-entrant
+  (callers use threads or asyncio executors to avoid blocking the loop)
+"""
+import os
 from pathlib import Path
-from typing import List, Tuple
-from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
-import numpy as np
 import cv2
+import numpy as np
+
+try:
+    import onnxruntime as ort
+except ImportError:
+    ort = None
 
 
-@dataclass
 class Detection:
-    """Single YOLO detection."""
-    bbox: Tuple[float, float, float, float]  # (x1, y1, x2, y2)
-    cls: int
-    cls_name: str
-    conf: float
+    """One detected object from raw model output."""
+    __slots__ = ('bbox', 'cls_id', 'cls_name', 'conf')
 
+    def __init__(self, bbox: List[float], cls_id: int, cls_name: str, conf: float):
+        self.bbox = bbox
+        self.cls_id = cls_id
+        self.cls_name = cls_name
+        self.conf = conf
+
+    def __repr__(self):
+        return f"Detection({self.cls_name} {self.conf:.2f} {self.bbox})"
+
+
+COCO_CLASSES = [
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
+    "truck", "boat", "traffic light", "fire hydrant", "stop sign",
+    "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep",
+    "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
+    "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard",
+    "sports ball", "kite", "baseball bat", "baseball glove", "skateboard",
+    "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork",
+    "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
+    "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
+    "couch", "potted plant", "bed", "dining table", "toilet", "tv",
+    "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave",
+    "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase",
+    "scissors", "teddy bear", "hair drier", "toothbrush",
+]
+
+PERSON_CLASS_ID = 0
+CONF_THRESHOLD = 0.4
+IOU_THRESHOLD = 0.45
+INPUT_SIZE = (416, 416)  # YOLOv8n default input
 
 
 class ModelManager:
-    """Manages YOLO model loading and inference.
-    Falls back to ONNX Runtime if OpenVINO is not available."""
+    """ONNX model manager with ROI-first CPU inference."""
 
-    CLASS_NAMES = [
-        'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus',
-        'train', 'truck', 'boat', 'traffic light', 'fire hydrant',
-        'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog',
-        'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra',
-        'giraffe', 'backpack', 'umbrella', 'handbag', 'tie',
-        'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball',
-        'kite', 'baseball bat', 'baseball glove', 'skateboard',
-        'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup',
-        'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
-        'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog',
-        'pizza', 'donut', 'cake', 'chair', 'couch', 'potted plant',
-        'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse',
-        'remote', 'keyboard', 'cell phone', 'microwave', 'oven',
-        'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase',
-        'scissors', 'teddy bear', 'hair drier', 'toothbrush',
-    ]
-
-    def __init__(
-        self,
-        model_path: str = "models/yolov8n.onnx",
-        input_size: Tuple[int, int] = (416, 416),
-        conf_threshold: float = 0.4,
-        nms_threshold: float = 0.45,
-    ):
+    def __init__(self,
+                 model_path: str = "models/yolov8n.onnx",
+                 input_size: Tuple[int, int] = INPUT_SIZE,
+                 conf_threshold: float = CONF_THRESHOLD,
+                 nms_threshold: float = IOU_THRESHOLD):
         self.model_path = Path(model_path)
-        self.input_size = input_size
+        self.input_w, self.input_h = input_size
         self.conf_threshold = conf_threshold
         self.nms_threshold = nms_threshold
-
         self._session = None
-        self._use_openvino = False
 
     def load(self):
-        """Load the model. Tries OpenVINO first, falls back to ONNX Runtime."""
-        try:
-            import openvino.runtime as ov
-        except ImportError:
-            print("[ModelManager] OpenVINO not available, using ONNX Runtime fallback")
-            self._load_onnx()
-            self._warmup()
-            return
-
-        try:
-            core = ov.Core()
-            ir_path = self.model_path.with_suffix('.xml')
-            if ir_path.exists():
-                model = core.read_model(str(ir_path))
-                self._session = core.compile_model(model, "CPU")
-                self._use_openvino = True
-                print(f"[ModelManager] Loaded OpenVINO IR model from {ir_path}")
-            elif self.model_path.suffix == '.onnx' and self.model_path.exists():
-                model = core.read_model(str(self.model_path))
-                self._session = core.compile_model(model, "CPU")
-                self._use_openvino = True
-                print(f"[ModelManager] Loaded ONNX model via OpenVINO from {self.model_path}")
-            else:
-                raise FileNotFoundError(f"Model not found: {self.model_path}")
-        except (FileNotFoundError, RuntimeError) as e:
-            print(f"[ModelManager] OpenVINO failed ({e}), falling back to ONNX Runtime")
-            self._load_onnx()
-
-        self._warmup()
-
-    def _load_onnx(self):
-        try:
-            import onnxruntime as ort
-        except ImportError:
-            raise RuntimeError(
-                "Neither OpenVINO nor ONNX Runtime is available. "
-                "Install onnxruntime: pip install onnxruntime"
-            )
+        if ort is None:
+            raise RuntimeError("onnxruntime not installed: pip install onnxruntime")
         if not self.model_path.exists():
             raise FileNotFoundError(f"Model not found: {self.model_path}")
+        thread_count = os.cpu_count() or 4
+        opts = ort.SessionOptions()
+        opts.intra_op_num_threads = max(1, thread_count - 1)
+        opts.inter_op_num_threads = 2
+        opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
         self._session = ort.InferenceSession(
             str(self.model_path),
             providers=['CPUExecutionProvider'],
+            sess_options=opts,
         )
-
-    def _warmup(self):
-        """Run a dummy inference to warm up the model."""
-        dummy = np.random.randn(1, 3, *self.input_size).astype(np.float32)
-        if self._use_openvino:
-            infer_request = self._session.create_infer_request()
-            infer_request.infer([dummy])
-        else:
-            input_name = self._session.get_inputs()[0].name
-            self._session.run(None, {input_name: dummy})
-        print("[ModelManager] Warm-up complete")
-
-    def preprocess(self, frame_bgr: np.ndarray) -> np.ndarray:
-        """Preprocess a BGR frame for YOLO inference.
-        Returns (1, 3, H, W) float32 tensor normalized to [0,1]."""
-        img = cv2.resize(frame_bgr, self.input_size)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = img.transpose(2, 0, 1)  # HWC → CHW
-        img = img.astype(np.float32) / 255.0
-        return np.expand_dims(img, axis=0)
-
-    def inference(self, tensor: np.ndarray) -> np.ndarray:
-        """Run inference on a preprocessed tensor. Returns raw model output."""
-        if self._session is None:
-            raise RuntimeError("Model not loaded. Call load() before inference().")
-        if self._use_openvino:
-            result = self._session([tensor])
-            return result[0] if isinstance(result, (list, tuple)) else result
-        else:
-            input_name = self._session.get_inputs()[0].name
-            return self._session.run(None, {input_name: tensor})[0]
-
-    def postprocess(self, output: np.ndarray) -> List[Detection]:
-        """Convert YOLOv8 raw output to Detection objects with per-class NMS."""
-        if output.ndim == 3:
-            output = output[0]
-        output = output.transpose(1, 0)  # (8400, 84)
-
-        boxes = output[:, :4]
-        scores = output[:, 4:]
-
-        detections: List[Detection] = []
-        img_w, img_h = self.input_size
-
-        for cls_id in range(scores.shape[1]):
-            cls_scores = scores[:, cls_id]
-            mask = cls_scores > self.conf_threshold
-            if not mask.any():
-                continue
-
-            cls_boxes = boxes[mask]
-            cls_confs = cls_scores[mask]
-
-            cls_name = self.CLASS_NAMES[cls_id] if cls_id < len(self.CLASS_NAMES) else str(cls_id)
-            cls_detections = []
-            for box, conf in zip(cls_boxes, cls_confs):
-                cx, cy, w, h = box
-                x1 = (cx - w / 2) * img_w
-                y1 = (cy - h / 2) * img_h
-                x2 = (cx + w / 2) * img_w
-                y2 = (cy + h / 2) * img_h
-
-                cls_detections.append(Detection(
-                    bbox=(x1, y1, x2, y2),
-                    cls=cls_id,
-                    cls_name=cls_name,
-                    conf=float(conf),
-                ))
-
-            detections.extend(self._nms(cls_detections))
-
-        return detections
-
-    def _nms(self, detections: List[Detection]) -> List[Detection]:
-        """Apply Non-Maximum Suppression."""
-        if not detections:
-            return []
-
-        boxes = np.array([d.bbox for d in detections])
-        scores = np.array([d.conf for d in detections])
-
-        indices = cv2.dnn.NMSBoxes(
-            boxes.tolist(), scores.tolist(),
-            self.conf_threshold, self.nms_threshold,
-        )
-
-        if len(indices) == 0:
-            return []
-
-        return [detections[i] for i in indices.flatten()]
-
-    def detect(self, frame_bgr: np.ndarray) -> List[Detection]:
-        """Full pipeline: preprocess → inference → postprocess."""
-        if self._session is None:
-            raise RuntimeError("Model not loaded. Call load() before detect().")
-        tensor = self.preprocess(frame_bgr)
-        output = self.inference(tensor)
-        return self.postprocess(output)
-
-    def preprocess_jpeg(self, jpeg_bytes: bytes) -> np.ndarray:
-        """Decode JPEG bytes to BGR frame."""
-        arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
-        return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        self._warmup()
 
     @property
-    def is_loaded(self) -> bool:
-        return self._session is not None
+    def input_size(self) -> Tuple[int, int]:
+        return (self.input_w, self.input_h)
+
+    def preprocess(self, frame: np.ndarray) -> np.ndarray:
+        """Resize BGR frame → NCHW float32 tensor (1,3,H,W) normalized [0,1]."""
+        img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = cv2.resize(img, (self.input_w, self.input_h),
+                         interpolation=cv2.INTER_LINEAR)
+        img = img.astype(np.float32) / 255.0
+        img = np.transpose(img, (2, 0, 1))  # HWC → CHW
+        return np.expand_dims(img, axis=0)
+
+    def preprocess_jpeg(self, jpeg_bytes: bytes) -> Optional[np.ndarray]:
+        """Decode JPEG bytes and preprocess. Returns None on failure."""
+        frame = cv2.imdecode(np.frombuffer(jpeg_bytes, dtype=np.uint8),
+                             cv2.IMREAD_COLOR)
+        if frame is None:
+            return None
+        return self.preprocess(frame)
+
+    def detect(self, frame: np.ndarray) -> List[Detection]:
+        """Run detection on a preprocessed NCHW tensor. Returns list of Detection."""
+        input_tensor = frame if frame.ndim == 4 else self.preprocess(frame)
+        outputs = self._session.run(None, {self._session.get_inputs()[0].name: input_tensor})
+        return self._postprocess(outputs, frame.shape[:2] if frame.ndim == 3 else None)
+
+    def _postprocess(self, outputs, orig_shape: Optional[Tuple[int, int]] = None) -> List[Detection]:
+        """YOLOv8 postprocessing: NMS, filter by class/confidence."""
+        preds = outputs[0][0]
+        boxes, scores, cls_ids = [], [], []
+        for pred in preds.T:
+            scores_arr = pred[4:]
+            cls_id = int(np.argmax(scores_arr))
+            score = float(scores_arr[cls_id])
+            if score < self.conf_threshold:
+                continue
+            xc, yc, w, h = pred[0], pred[1], pred[2], pred[3]
+            if orig_shape:
+                orig_h, orig_w = orig_shape
+                sw, sh = orig_w / self.input_w, orig_h / self.input_h
+            else:
+                sw = sh = 1.0
+            x1 = (xc - w / 2) * sw
+            y1 = (yc - h / 2) * sh
+            x2 = (xc + w / 2) * sw
+            y2 = (yc + h / 2) * sh
+            boxes.append([x1, y1, x2, y2])
+            scores.append(score)
+            cls_ids.append(cls_id)
+
+        if not boxes:
+            return []
+
+        indices = cv2.dnn.NMSBoxes(boxes, scores, self.conf_threshold, self.nms_threshold)
+        results = []
+        for i in indices.flatten():
+            c = cls_ids[i] if i < len(cls_ids) else 0
+            results.append(Detection(
+                bbox=boxes[i],
+                cls_id=c,
+                cls_name=COCO_CLASSES.get(c, "?"),
+                conf=scores[i],
+            ))
+        return results
+
+    def _warmup(self):
+        """CPU kernel warmup — runs once after model load."""
+        dummy = np.zeros((self.input_h, self.input_w, 3), dtype=np.uint8)
+        self.detect(dummy)
+        print("[ModelManager] Warm-up complete")

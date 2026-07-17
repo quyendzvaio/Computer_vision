@@ -1,3 +1,16 @@
 [tool.pytest.ini_options]
-testpaths = ["tests/gpu"]
+testpaths = ["tests/phase1", "tests/phase2", "tests/gpu"]
 addopts = "-p no:cacheprovider"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_unused_ignores = true
+exclude = "^(edge|gpu|inference|alert|dashboard)/"

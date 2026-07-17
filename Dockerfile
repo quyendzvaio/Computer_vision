@@ -1,6 +1,5 @@
 # GPU Server — YOLOv8 detect → FastAPI dashboard
-# Cold-start: CUDA kernel warmup on init (first frame ~0.3s instead of ~3s)
-# Image size: ~1.1GB (base: nvidia/cuda runtime 12.2)
+# Quadro T2000 target. CUDA 12.2 runtime, ~1.1GB image.
 FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -10,15 +9,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# ponytail: no dev deps
 COPY requirements-gpu.txt .
-RUN pip install --no-cache-dir -r requirements-gpu.txt && rm requirements-gpu.txt
+RUN pip install --no-cache-dir -r requirements-gpu.txt && pip cache purge && rm requirements-gpu.txt
 
 # Layer: app code
 COPY gpu/ gpu/
 COPY shared/ shared/
 COPY edge/config.yaml edge/config.yaml
 
-# Model bind-mount from host (avoid baking into image)
 VOLUME /app/gpu/models
 
 EXPOSE 5555 5556 8080

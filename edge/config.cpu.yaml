@@ -1,0 +1,14 @@
+# CPU-only server config — lower resolution for CPU-based detection
+gpu_host: 127.0.0.1
+jpeg_quality: 60
+cameras:
+  - id: cam1
+    device_path: 0
+    zmq_port: 5555
+    fps: 3
+    resolution: [320, 240]
+  - id: cam2
+    device_path: 1
+    zmq_port: 5556
+    fps: 3
+    resolution: [320, 240]

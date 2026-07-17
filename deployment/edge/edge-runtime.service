@@ -1,0 +1,18 @@
+[Unit]
+Description=Construction Safety Edge Runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/construction-safety
+ExecStart=/opt/construction-safety/.venv/bin/python -m edge_runtime.main --config-dir /etc/construction-safety
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+User=construction-safety
+Group=video
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
